@@ -10,7 +10,7 @@
   'use strict';
   var TG = window.Telegram && window.Telegram.WebApp;
   var API = '../api/';
-  var S = { boot: null, prov: 'filmbox', homeCache: {}, detailCache: {}, timers: [] };
+  var S = { boot: null, prov: 'filmbox', homeCache: {}, detailCache: {}, timers: [], prepped: {} };
   var $view = document.getElementById('view');
   var $tab = document.getElementById('tabbar');
 
@@ -71,6 +71,9 @@
     // Gambar Amazon (Prime Video): sisipkan ._SX<lebar>_ (±1-2 MB -> ±20 KB)
     var am = src && src.indexOf('._') < 0 && /^(https:\/\/[a-z0-9.-]+amazon\.com\/images\/S\/[^?]+)\.(jpe?g|png)$/i.exec(src);
     if (am) return am[1] + '._SX' + (w ? Math.max(w, 300) : 360) + '_.' + am[2];
+    // Banner iQIYI "_xxx" = ukuran asli (±400 KB) -> versi 16:9 lebih kecil (±55 KB)
+    var iq = src && /^(https:\/\/pic\d*\.iqiyipic\.com\/.+)_xxx\.jpg$/i.exec(src);
+    if (iq) { var iw = (w || 480) > 480 ? 720 : 480; return iq[1] + '_' + iw + '_' + Math.round(iw * 9 / 16) + '.jpg'; }
     if (!src || !/^https:\/\/[a-z0-9.-]*aoneroom\.com\//i.test(src) || src.indexOf('?') >= 0) return src;
     return src + '?x-oss-process=image/resize,w_' + (w || 240) + '/quality,q_80/format,webp';
   }
@@ -407,6 +410,15 @@
       } else {
         $view.innerHTML = html;
       }
+      // Siapkan link video episode yang akan ditonton di server (diam-diam), jadi tombol Tonton langsung jalan
+      if (playHref !== '#/vip') {
+        var pk = p + '|' + d.id + '|' + start.se + '|' + start.ep;
+        if (!S.prepped[pk] || Date.now() - S.prepped[pk] > 1500000) {
+          S.prepped[pk] = Date.now();
+          api('prep', { p: p, id: d.id, path: d.path, se: start.se, ep: start.ep });
+        }
+        if (hlsProv(p)) loadJS(HLS_JS, function () {});
+      }
       document.getElementById('bk').onclick = function () { history.length > 1 ? history.back() : (location.hash = '#/'); };
       var md = document.getElementById('moreDesc');
       if (md) md.onclick = function () { document.getElementById('desc').classList.remove('clamp'); md.remove(); };
@@ -422,8 +434,12 @@
   }
 
   /* ---------------- tonton ---------------- */
+  function hlsProv(p) {
+    return ((S.boot && S.boot.app.providers) || []).some(function (x) { return x.id === p && x.hls; });
+  }
   function renderWatch(p, id, path, se, ep) {
     loading();
+    if (hlsProv(p)) loadJS(HLS_JS, function () {}); // pemutar HLS dimuat bersamaan dengan data video
     loadDetail(p, id, path).then(function (dj) {
       if (!dj.ok) { $view.innerHTML = errBox(dj.error); return; }
       var d = dj.data, eps = epsOf(d);

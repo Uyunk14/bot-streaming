@@ -159,7 +159,7 @@ try {
     if (!empty($user['banned'])) fail('Akun kamu diblokir admin.', 403);
     $isVip = user_is_vip($user);
 
-    $needProvider = in_array($action, ['home', 'search', 'detail', 'play'], true);
+    $needProvider = in_array($action, ['home', 'search', 'detail', 'play', 'prep'], true);
     $prov = null;
     if ($needProvider) {
         $pid = inp('p', 'filmbox');
@@ -172,7 +172,7 @@ try {
     switch ($action) {
         case 'boot':
             $provs = [];
-            foreach (providers_enabled() as $id => $info) $provs[] = ['id' => $id, 'name' => $info['name'], 'ext' => !empty($info['external'])];
+            foreach (providers_enabled() as $id => $info) $provs[] = ['id' => $id, 'name' => $info['name'], 'ext' => !empty($info['external']), 'hls' => !empty($info['hls'])];
             ok([
                 'app' => [
                     'name' => setting('bot_name'),
@@ -204,6 +204,21 @@ try {
             $r = $prov->search($kw, (int) inp('page', '1'), in_array($type, [0, 1, 2], true) ? $type : 0);
             if (!$r['ok']) fail($r['error'], 502);
             ok(['data' => $r['data']]);
+
+        case 'prep':
+            // Dipanggil diam-diam saat halaman detail dibuka: link video episode pertama/lanjutan
+            // diambil lebih dulu ke cache, jadi saat Tonton ditekan tidak menunggu Indocast lagi.
+            $det = $prov->detail(inp('id'), inp('path'));
+            if (!$det['ok']) ok(['ready' => false]);
+            $d = $det['data'];
+            $se = (int) inp('se', '0');
+            $ep = (int) inp('ep', '0');
+            if ($d['type'] === 1) { $se = 0; $ep = 0; }
+            elseif (!episode_exists($prov, $d, $se, $ep)) ok(['ready' => false]);
+            if (!$isVip && $d['type'] === 2 && !in_array($se . ':' . $ep, free_episode_keys($prov, $d), true)) ok(['ready' => false]);
+            if (method_exists($prov, 'stream')) $r = $prov->stream(inp('id'), $d['path'], $se, $ep);
+            else $r = $prov->play(inp('id'), inp('path'), $se, $ep, 'in_id');
+            ok(['ready' => (bool) $r['ok']]);
 
         case 'detail':
             $r = $prov->detail(inp('id'), inp('path'));
