@@ -1,6 +1,6 @@
 # Bot Streaming + Mini App Telegram
 
-Bot Telegram untuk menonton film/drama/anime lewat Mini App. Sumber film dari API Indocast (provider pertama: Filmbox).
+Bot Telegram untuk menonton film/drama/anime lewat Mini App. Sumber film dari API Indocast (provider: Filmbox, iQIYI).
 PHP murni + MySQL, jalan di cPanel (PHP 7.4 – 8.4). Semua pengaturan (token bot, API key, warna, paket VIP, QRIS)
 diatur dari **web admin**, bukan di file.
 
@@ -42,6 +42,8 @@ diatur dari **web admin**, bukan di file.
    `home()`, `search()`, `detail()`, `play()` yang mengembalikan format sama seperti `filmbox.php`.
 2. Daftarkan di `provider_registry()` (`lib/indocast.php`).
 3. Centang provider di Admin → Pengaturan.
+4. Video HLS (m3u8): kembalikan sumber `hls => true` dan sediakan method `playlist()` (lihat `iqiyi.php`);
+   playlist disajikan `api/?a=m3u8` (tautan bertanda tangan) dan diputar dengan hls.js (dimuat saat perlu).
 
 ## Pengembangan
 - Setiap mengubah app.js/app.css, naikkan angka `?v=` di app/index.html (file JS/CSS disimpan lama di HP).

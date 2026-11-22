@@ -75,7 +75,7 @@ function provider_registry()
 {
     return [
         'filmbox' => ['name' => 'Filmbox', 'note' => 'Film, series, anime'],
-        // 'drakorid' => ['name' => 'DrakorID', 'note' => 'menyusul'],
+        'iqiyi' => ['name' => 'iQIYI', 'note' => 'Drama China/Korea, anime, variety (HLS)'],
     ];
 }
 

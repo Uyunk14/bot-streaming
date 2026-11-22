@@ -59,6 +59,23 @@ try {
         exit;
     }
 
+    /* ---------- Playlist HLS (provider berbasis m3u8, mis. iQIYI) ---------- */
+    if ($action === 'm3u8') {
+        if (!verify_params(array_intersect_key($_GET, array_flip(['p', 'path', 'se', 'ep', 'x', 's'])))) {
+            http_response_code(403);
+            exit;
+        }
+        $prov = provider_get($_GET['p']);
+        if (!$prov || !method_exists($prov, 'playlist')) { http_response_code(404); exit; }
+        $txt = $prov->playlist($_GET['path'], (int) $_GET['se'], (int) $_GET['ep'], !(isset($_GET['via']) && $_GET['via'] === 'p'));
+        if ($txt === null) { http_response_code(404); exit; }
+        header('Content-Type: application/vnd.apple.mpegurl');
+        header('Cache-Control: private, max-age=600');
+        header('Access-Control-Allow-Origin: *');
+        echo $txt;
+        exit;
+    }
+
     /* ---------- Autentikasi Mini App ---------- */
     $initData = isset($_SERVER['HTTP_X_INIT_DATA']) ? $_SERVER['HTTP_X_INIT_DATA'] : '';
     $tgUser = tg_validate_init_data($initData);
@@ -146,7 +163,7 @@ try {
                 }
             }
             $r = $prov->play($id, $path, $se, $ep, 'in_id');
-            if (!$r['ok']) fail($r['error'], 502);
+            if (!$r['ok']) fail($r['error'], empty($r['unavailable']) ? 502 : 404);
             if (!$r['data']['sources']) fail('Video belum tersedia, coba episode lain.', 404);
             $subs = [];
             foreach ($r['data']['subtitles'] as $s) {
@@ -155,13 +172,18 @@ try {
             }
             // Urutkan: Indonesia dulu, lalu English
             usort($subs, function ($a, $b) {
-                $rank = function ($l) { return $l === 'in_id' ? 0 : ($l === 'en' ? 1 : 2); };
+                $rank = function ($l) { return ($l === 'in_id' || $l === 'id') ? 0 : (($l === 'en' || $l === 'en-US') ? 1 : 2); };
                 return $rank($a['lang']) - $rank($b['lang']);
             });
             stat_inc('plays');
             q("INSERT INTO views (d, provider, subject_id, title, n) VALUES (CURDATE(), ?, ?, ?, 1) ON DUPLICATE KEY UPDATE n = n + 1, title = VALUES(title)", [$prov->id, $d['id'], mb_substr($d['title'], 0, 255)]);
             ok(['data' => [
-                'sources' => array_map(function ($s) { return ['res' => $s['res'], 'url' => $s['url'], 'proxy' => $s['proxy']]; }, $r['data']['sources']),
+                'sources' => array_map(function ($s) use ($prov, $path, $se, $ep) {
+                    if (empty($s['hls'])) return ['res' => $s['res'], 'url' => $s['url'], 'proxy' => $s['proxy']];
+                    // Playlist disajikan server kita (tautan bertanda tangan, berlaku 3 jam)
+                    $u = base_url('api/?a=m3u8&' . http_build_query(sign_params(['p' => $prov->id, 'path' => $path, 'se' => $se, 'ep' => $ep], 10800)));
+                    return ['res' => $s['res'], 'url' => $u, 'proxy' => $u . '&via=p', 'hls' => true];
+                }, $r['data']['sources']),
                 'subtitles' => $subs,
                 'preview' => $preview,
                 'se' => $se,

@@ -123,6 +123,7 @@
     clearTimers();
     var oldVid = document.getElementById('vid');
     if (oldVid && !oldVid.paused) oldVid.pause(); // memicu simpan posisi tontonan
+    if (S.hls) { var oldH = S.hls; S.hls = null; setTimeout(function () { try { oldH.destroy(); } catch (e) {} }, 400); } // tunda: posisi sempat tersimpan
     Array.prototype.forEach.call(document.querySelectorAll('.sheet-bg'), function (el) { el.remove(); });
     if (document.body.classList.contains('pfs-on')) {
       document.body.classList.remove('pfs-on');
@@ -449,32 +450,55 @@
     var cur = { q: 0, sub: subs.length ? subs[0].lang : '', useProxy: false };
     var lastSave = 0;
 
+    var failed = function () {
+      if (!document.body.contains(vid)) return;
+      if (!cur.useProxy && srcs[cur.q].proxy) { cur.useProxy = true; load(true); }
+      else toast('Video gagal dimuat. Coba kualitas lain.');
+    };
     var load = function (keepTime) {
       var t = keepTime ? vid.currentTime : resume;
       var s = srcs[cur.q];
-      vid.src = cur.useProxy && s.proxy ? s.proxy : s.url;
+      var src = cur.useProxy && s.proxy ? s.proxy : s.url;
+      hlsStop();
       vid.querySelectorAll('track').forEach(function (tr) { tr.remove(); });
       subs.forEach(function (sb) {
         var tr = document.createElement('track');
-        tr.kind = 'subtitles'; tr.label = sb.label; tr.srclang = sb.lang === 'in_id' ? 'id' : sb.lang.slice(0, 3); tr.src = sb.url;
+        tr.kind = 'subtitles'; tr.label = sb.label; tr.srclang = sb.lang === 'in_id' ? 'id' : sb.lang.split('-')[0].slice(0, 3); tr.src = sb.url;
         if (sb.lang === cur.sub) tr.default = true;
         vid.appendChild(tr);
       });
       vid.addEventListener('loadedmetadata', function once() {
         vid.removeEventListener('loadedmetadata', once);
-        if (t > 0) vid.currentTime = t;
+        if (t > 0 && Math.abs(vid.currentTime - t) > 1) vid.currentTime = t;
         showSub();
       });
+      var go = function () { var pr = vid.play(); if (pr && pr.catch) pr.catch(function () {}); };
+      // HLS (m3u8): pakai hls.js bila browser mendukung MSE (Android/desktop); iPhone memutar HLS bawaan.
+      if (s.hls && !(!window.MediaSource && vid.canPlayType('application/vnd.apple.mpegurl'))) {
+        loadJS(HLS_JS, function () {
+          if (!document.body.contains(vid)) return; // pengguna sudah pindah halaman
+          if (!window.Hls || !Hls.isSupported()) { vid.src = src; vid.load(); return go(); }
+          var h = new Hls({ startPosition: t > 0 ? t : -1, maxBufferLength: 30, backBufferLength: 60 });
+          S.hls = h;
+          h.on(Hls.Events.ERROR, function (e, er) {
+            if (!er.fatal || S.hls !== h) return;
+            if (er.type === Hls.ErrorTypes.MEDIA_ERROR && !h._rec) { h._rec = 1; h.recoverMediaError(); return; }
+            failed();
+          });
+          h.loadSource(src);
+          h.attachMedia(vid);
+          go();
+        });
+        return;
+      }
+      vid.src = src;
       vid.load();
-      var pr = vid.play(); if (pr && pr.catch) pr.catch(function () {});
+      go();
     };
     var showSub = function () {
       Array.prototype.forEach.call(vid.textTracks, function (tt, i) { tt.mode = subs[i] && subs[i].lang === cur.sub ? 'showing' : 'disabled'; });
     };
-    vid.addEventListener('error', function () {
-      if (!cur.useProxy && srcs[cur.q].proxy) { cur.useProxy = true; load(true); }
-      else toast('Video gagal dimuat. Coba kualitas lain.');
-    });
+    vid.addEventListener('error', function () { if (!S.hls) failed(); });
 
     var save = function (force) {
       if (!vid.duration || isNaN(vid.duration)) return;
@@ -813,6 +837,23 @@
   }
 
   // Pustaka QR baru dimuat saat dibutuhkan (tidak memperlambat pembukaan aplikasi)
+  // Pemutar HLS (versi ringan, ±90 KB) baru dimuat saat video m3u8 diputar
+  var HLS_JS = 'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.20/hls.light.min.js';
+  var jsWait = {};
+  function loadJS(src, cb) {
+    if (jsWait[src] === true) return cb(true);
+    if (jsWait[src]) return jsWait[src].push(cb);
+    jsWait[src] = [cb];
+    var s = document.createElement('script');
+    s.src = src; s.async = true;
+    var done = function (okk) { var l = jsWait[src]; jsWait[src] = okk ? true : null; if (!okk) s.remove(); l.forEach(function (f) { f(okk); }); };
+    s.onload = function () { done(true); }; s.onerror = function () { done(false); };
+    document.head.appendChild(s);
+  }
+  function hlsStop() {
+    if (S.hls) { try { S.hls.destroy(); } catch (e) {} S.hls = null; }
+  }
+
   function loadScript(src, cb) {
     if (window.QRCode) return cb(true);
     var s = document.createElement('script');
