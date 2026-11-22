@@ -133,24 +133,43 @@
       shaka.polyfill.installAll();
       if (!shaka.Player.isBrowserSupported()) throw new Error('Shaka: browser tidak didukung');
       log('Shaka Player ' + shaka.Player.version + ' siap.');
-      player = new shaka.Player();
-      return player.attach($v).then(function () {
-        var cfg = { drm: { servers: { 'com.widevine.alpha': info.license }, advanced: { 'com.widevine.alpha': { videoRobustness: 'SW_SECURE_CRYPTO', audioRobustness: 'SW_SECURE_CRYPTO' } } }, streaming: { bufferingGoal: 20 } };
-        if (info.cert) cfg.drm.advanced['com.widevine.alpha'].serverCertificate = b64(info.cert);
-        player.configure(cfg);
-        player.getNetworkingEngine().registerResponseFilter(function (type, resp) {
-          if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) log('Lisensi diterima (' + resp.data.byteLength + ' byte).', 'g');
-        });
-        player.addEventListener('error', function (ev) { log(errText(ev.detail), 'r'); });
-        player.addEventListener('keystatuschanged', function () {
-          try { var m = player.getKeyStatuses(); log('Status kunci: ' + JSON.stringify(m), JSON.stringify(m).indexOf('usable') >= 0 ? 'g' : 'y'); } catch (x) {}
-        });
-        return play(info.stream, 'CDN langsung').catch(function (e) {
+      // Beberapa cara dicoba berurutan sampai ada yang berhasil
+      var tries = [
+        { name: 'tanpa sertifikat, L3', cert: false, rob: 'SW_SECURE_CRYPTO', url: info.stream },
+        { name: 'tanpa sertifikat, keamanan bawaan', cert: false, rob: '', url: info.stream },
+        { name: 'dengan sertifikat', cert: true, rob: '', url: info.stream },
+        { name: 'proxy Indocast', cert: false, rob: '', url: info.stream_proxy }
+      ].filter(function (t) { return t.url && (!t.cert || info.cert); });
+      var attempt = function (i) {
+        var t = tries[i];
+        return (player ? player.destroy() : Promise.resolve()).then(function () {
+          player = new shaka.Player();
+          return player.attach($v);
+        }).then(function () {
+          var adv = {};
+          if (t.rob) { adv.videoRobustness = t.rob; adv.audioRobustness = t.rob; }
+          if (t.cert) adv.serverCertificate = b64(info.cert);
+          player.configure({ drm: { servers: { 'com.widevine.alpha': info.license }, advanced: { 'com.widevine.alpha': adv } }, streaming: { bufferingGoal: 20 } });
+          var ne = player.getNetworkingEngine();
+          ne.registerRequestFilter(function (type, req) {
+            if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) log('Minta lisensi (' + (req.body ? req.body.byteLength : 0) + ' byte)…');
+          });
+          ne.registerResponseFilter(function (type, resp) {
+            if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) log('Lisensi diterima (' + resp.data.byteLength + ' byte).', 'g');
+          });
+          player.addEventListener('error', function (ev) { log(errText(ev.detail), 'r'); });
+          player.addEventListener('keystatuschanged', function () {
+            try { var m = player.getKeyStatuses(); log('Status kunci: ' + JSON.stringify(m), JSON.stringify(m).indexOf('usable') >= 0 ? 'g' : 'y'); } catch (x) {}
+          });
+          return play(t.url, 'cara ' + (i + 1) + ': ' + t.name);
+        }).catch(function (e) {
           log('Gagal: ' + errText(e), 'r');
-          if (!info.stream_proxy || (e && e.code === 6001)) throw e;
-          return play(info.stream_proxy, 'proxy Indocast');
+          if (e && e.code === 6001) throw e; // memang tidak ada Widevine
+          if (i + 1 < tries.length) return attempt(i + 1);
+          throw e;
         });
-      });
+      };
+      return attempt(0);
     }).catch(function (e) {
       log('GAGAL: ' + errText(e), 'r');
       verdict(false, '❌ Video tidak bisa diputar — kirim screenshot log ini');

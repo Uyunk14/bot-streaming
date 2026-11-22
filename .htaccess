@@ -17,8 +17,8 @@ DirectoryIndex index.php index.html
 </IfModule>
 
 <IfModule mod_headers.c>
-  # Mini App: index.html selalu dicek ulang supaya pembaruan cepat terlihat
-  <FilesMatch "index\.html$">
+  # Halaman HTML (index, drmtest) selalu dicek ulang supaya pembaruan cepat terlihat
+  <FilesMatch ".html$">
     Header set Cache-Control "no-cache"
   </FilesMatch>
   # app.js / app.css diberi versi (?v=) di index.html -> boleh disimpan lama di HP
