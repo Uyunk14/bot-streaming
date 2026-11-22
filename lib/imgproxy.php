@@ -59,7 +59,8 @@ function img_serve($u, $w, $k)
                     $im = $dst;
                 }
                 ob_start();
-                imagejpeg($im, null, 80);
+                // WebP ±30-40% lebih kecil dari JPEG; didukung WebView Telegram (Android & iOS 14+)
+                if (function_exists('imagewebp')) imagewebp($im, null, 72); else imagejpeg($im, null, 78);
                 $out = ob_get_clean();
                 imagedestroy($im);
             }

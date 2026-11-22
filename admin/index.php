@@ -54,4 +54,13 @@ if ($warn) echo '<div class="flash err">' . implode('<br>', array_map('e', $warn
   <div class="meter"><i style="width:<?= min(100, round($apiToday / 10000, 2)) ?>%"></i></div>
   <p class="muted" style="margin:8px 0 0"><?= number_format($apiToday, 0, ',', '.') ?> dari 1.000.000 request / 24 jam · cache menghemat <?= number_format($hitToday, 0, ',', '.') ?> request</p>
 </div>
+<?php
+$gd = function_exists('imagecreatefromstring');
+$webp = function_exists('imagewebp');
+$imgN = count((array) glob(APP_ROOT . '/storage/img/*.jpg'));
+?>
+<div class="box"><h2>Pengolah gambar (poster Animekompi &amp; banner WeTV)</h2>
+  <p style="margin:0"><?= $gd ? '✅ GD aktif' . ($webp ? ' + WebP' : ' (tanpa WebP, pakai JPEG)') . ' — gambar diperkecil otomatis.' : '⚠️ Ekstensi <b>GD</b> belum aktif: gambar dikirim ukuran asli (lebih berat). Aktifkan di cPanel → Select PHP Version → Extensions → centang <b>gd</b>.' ?></p>
+  <p class="muted" style="margin:6px 0 0"><?= number_format($imgN, 0, ',', '.') ?> gambar tersimpan di server.</p>
+</div>
 <?php admin_foot();

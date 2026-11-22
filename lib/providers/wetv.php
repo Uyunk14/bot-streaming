@@ -9,6 +9,7 @@
  * - Judul "Sewa" (rental), Trailer, Teaser tidak bisa diputar -> dilewati.
  */
 require_once dirname(__DIR__) . '/indocast.php';
+require_once dirname(__DIR__) . '/imgproxy.php';
 
 class Provider_wetv extends BaseProvider
 {
@@ -34,7 +35,8 @@ class Provider_wetv extends BaseProvider
         $n = isset($r['episodeTotal']) ? (int) $r['episodeTotal'] : (isset($r['episodes']) && !is_array($r['episodes']) ? (int) $r['episodes'] : 0);
         $score = isset($r['score']) && is_numeric($r['score']) ? round((float) $r['score'], 1) : 0;
         $cover = $wide
-            ? preg_replace('#/(\d+)$#', '/1080', (string) (isset($r['coverHorizontal']) ? $r['coverHorizontal'] : ''))
+            // banner WeTV cuma ada ukuran 1080p (±216 KB) -> diperkecil + WebP lewat server (±30 KB)
+            ? img_url(preg_replace('#/(\d+)$#', '/1080', (string) (isset($r['coverHorizontal']) ? $r['coverHorizontal'] : '')), 720)
             : self::vpic(isset($r['coverVertical']) ? $r['coverVertical'] : '');
         return [
             'id' => (string) $r['id'],
@@ -68,7 +70,7 @@ class Provider_wetv extends BaseProvider
 
     public function home($force = false)
     {
-        $ck = 'home:wetv:v1';
+        $ck = 'home:wetv:v2';
         if (!$force) {
             $hit = cache_get($ck);
             if ($hit !== null) { stat_inc('cache_hits'); return ['ok' => true, 'data' => $hit, 'error' => '']; }
