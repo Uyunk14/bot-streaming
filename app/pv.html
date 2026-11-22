@@ -16,6 +16,7 @@
   .pvbody { padding:16px; display:flex; flex-direction:column; gap:16px; }
   .pvmsg { padding:28px 20px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
   .pvmsg .big { font-size:40px; }
+  .pv-unmute { position:absolute; top:10px; left:10px; z-index:6; border:0; border-radius:999px; padding:8px 14px; background:rgba(0,0,0,.7); color:#fff; font:600 13px Inter,system-ui,sans-serif; }
   .pvmsg p { margin:0; color:var(--muted); font-size:13px; line-height:1.6; max-width:340px; }
 </style>
 <script>window.NY_PLAYER_ONLY = 1;</script>
@@ -109,36 +110,29 @@
   }
 
   /* 3) Putar */
-  function start(url) {
-    var raw = [], kids = [];
-    return fetch(url).then(function (r) { return r.text(); }).then(function (mpd) {
-      var m, re = /default_KID\s*=\s*"([0-9a-fA-F-]{32,36})"/g;
-      while ((m = re.exec(mpd))) { var k = m[1].replace(/-/g, '').toLowerCase(); if (kids.indexOf(k) < 0) kids.push(k); }
-      var rw = /EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED"[^>]*>\s*<cenc:pssh>\s*([A-Za-z0-9+\/=]+)/gi, seen = {};
-      while ((m = rw.exec(mpd))) {
-        if (seen[m[1]]) continue; seen[m[1]] = 1;
-        var u = b64(m[1]), hex = Array.prototype.map.call(u, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-        var box = u.length > 8 && u[4] === 0x70 && u[5] === 0x73 && u[6] === 0x73 && u[7] === 0x68;
-        raw.push({ data: box ? u : wvBox(u), kid: kids.filter(function (k) { return hex.indexOf(k) >= 0; })[0] || '' });
-      }
-    }, function () {}).then(function () {
-      return (player ? player.destroy() : Promise.resolve()).then(function () {
-        player = new shaka.Player();
-        return player.attach(vid);
-      });
+  /* mode "wrap": data Widevine dari manifest (isi mentah, tanpa kotak PSSH) dibungkus -> paling cepat,
+     manifest tidak perlu diunduh dua kali. mode "kids": PSSH dibuat dari ID kunci (cadangan). */
+  function isBox(u) { return u && u.length > 8 && u[4] === 0x70 && u[5] === 0x73 && u[6] === 0x73 && u[7] === 0x68; }
+  function start(url, mode) {
+    return (player ? player.destroy() : Promise.resolve()).then(function () {
+      player = new shaka.Player();
+      return player.attach(vid);
     }).then(function () {
       player.configure({
         drm: {
           servers: { 'com.widevine.alpha': info.license },
+          advanced: { 'com.widevine.alpha': { videoRobustness: 'SW_SECURE_CRYPTO', audioRobustness: 'SW_SECURE_CRYPTO' } },
           initDataTransform: function (initData, type, drmInfo) {
-            var ks = [];
-            try { if (drmInfo && drmInfo.keyIds) drmInfo.keyIds.forEach(function (k) { ks.push(String(k).toLowerCase()); }); } catch (x) {}
-            if (raw.length) return (raw.filter(function (r) { return r.kid && ks.indexOf(r.kid) >= 0; })[0] || raw[0]).data;
-            kids.forEach(function (k) { if (ks.indexOf(k) < 0) ks.push(k); });
-            return ks.length ? wvFromKids(ks) : initData;
+            var u = new Uint8Array(initData.buffer ? initData.buffer.slice(initData.byteOffset || 0, (initData.byteOffset || 0) + initData.byteLength) : initData);
+            if (mode === 'kids') {
+              var ks = [];
+              try { if (drmInfo && drmInfo.keyIds) drmInfo.keyIds.forEach(function (k) { ks.push(String(k).toLowerCase()); }); } catch (x) {}
+              return ks.length ? wvFromKids(ks) : initData;
+            }
+            return isBox(u) ? initData : wvBox(u);
           }
         },
-        streaming: { bufferingGoal: 30, rebufferingGoal: 2 },
+        streaming: { bufferingGoal: 30, rebufferingGoal: 1.5 },
         abr: { enabled: true }
       });
       player.addEventListener('error', function (ev) { console.warn('shaka', ev.detail); });
@@ -205,6 +199,20 @@
     });
   }
 
+  function showUnmute() {
+    if (!vid.muted || document.getElementById('unmute')) return;
+    var b = document.createElement('button');
+    b.id = 'unmute'; b.className = 'pv-unmute'; b.textContent = '🔇 Ketuk untuk suara';
+    pl.appendChild(b);
+    var on = function () {
+      vid.muted = false; b.remove();
+      document.removeEventListener('pointerup', on, true);
+      document.removeEventListener('touchend', on, true);
+    };
+    document.addEventListener('pointerup', on, true); // pointerup/touchend = aktivasi pengguna (pointerdown sentuh bukan)
+    document.addEventListener('touchend', on, true);
+  }
+
   /* Simpan posisi tontonan (Lanjut Nonton di Mini App) */
   var lastSave = 0;
   function save(force) {
@@ -233,17 +241,28 @@
       $body.innerHTML = '<div><div class="h2" style="font-size:18px;font-weight:800">' + esc(info.title) + '</div><div class="muted" style="margin-top:4px;font-size:13px">' + esc(info.label) + '</div></div><div id="opts" style="display:flex;flex-direction:column;gap:16px"></div>';
       NP.bind(vid, pl, info.preview);
       shaka.polyfill.installAll();
-      return start(info.stream).catch(function (e) {
-        console.warn('direct failed', e);
-        if (!info.stream_proxy || (e && e.code === 6001)) throw e;
-        return start(info.stream_proxy);
-      });
+      var tries = [[info.stream, 'wrap'], [info.stream, 'kids'], [info.stream_proxy, 'wrap']].filter(function (t) { return t[0]; });
+      var go = function (i) {
+        return start(tries[i][0], tries[i][1]).catch(function (e) {
+          console.warn('cara ' + (i + 1) + ' gagal', e);
+          if ((e && e.code === 6001) || i + 1 >= tries.length) throw e;
+          return go(i + 1);
+        });
+      };
+      return go(0);
     }).then(function () {
       drawOpts();
       player.addEventListener('adaptation', drawOpts);
       player.addEventListener('variantchanged', drawOpts);
       addSubs().then(drawOpts);
-      var p = vid.play(); if (p && p.catch) p.catch(function () {});
+      // Chrome menahan autoplay bersuara di halaman yang baru dibuka -> tetap putar tanpa suara,
+      // suara menyala di ketukan pertama (tidak perlu menunggu pengguna menekan ▶).
+      var p = vid.play();
+      if (p && p.catch) p.catch(function () {
+        vid.muted = true;
+        var p2 = vid.play();
+        if (p2 && p2.then) p2.then(showUnmute, function () {});
+      });
       vid.addEventListener('timeupdate', function () {
         save(false);
         if (info.preview && vid.currentTime >= info.preview) {

@@ -147,6 +147,14 @@ try {
         header('Content-Type: application/vnd.apple.mpegurl');
         header('Cache-Control: private, max-age=600');
         header('Access-Control-Allow-Origin: *');
+        // Playlist ±570 KB (tautan segmen panjang) -> gzip ±10x lebih kecil, jauh lebih cepat di jaringan HP
+        $ae = isset($_SERVER['HTTP_ACCEPT_ENCODING']) ? $_SERVER['HTTP_ACCEPT_ENCODING'] : '';
+        if (function_exists('gzencode') && stripos($ae, 'gzip') !== false && !ini_get('zlib.output_compression')) {
+            header('Content-Encoding: gzip');
+            header('Vary: Accept-Encoding');
+            $txt = gzencode($txt, 5);
+        }
+        header('Content-Length: ' . strlen($txt));
         echo $txt;
         exit;
     }
