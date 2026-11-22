@@ -134,6 +134,12 @@ try {
         exit;
     }
 
+    /* ---------- Gambar lewat server (domain diblokir / terlalu besar) ---------- */
+    if ($action === 'img') {
+        require_once dirname(__DIR__) . '/lib/imgproxy.php';
+        img_serve(isset($_GET['u']) ? (string) $_GET['u'] : '', isset($_GET['w']) ? (int) $_GET['w'] : 300, isset($_GET['k']) ? (string) $_GET['k'] : '');
+    }
+
     /* ---------- Playlist HLS (provider berbasis m3u8, mis. iQIYI) ---------- */
     if ($action === 'm3u8') {
         if (!verify_params(array_intersect_key($_GET, array_flip(['p', 'path', 'se', 'ep', 'x', 's'])))) {
@@ -286,7 +292,10 @@ try {
             q("INSERT INTO views (d, provider, subject_id, title, n) VALUES (CURDATE(), ?, ?, ?, 1) ON DUPLICATE KEY UPDATE n = n + 1, title = VALUES(title)", [$prov->id, $d['id'], mb_substr($d['title'], 0, 255)]);
             ok(['data' => [
                 'sources' => array_map(function ($s) use ($prov, $path, $se, $ep) {
-                    if (empty($s['hls'])) return ['res' => $s['res'], 'url' => $s['url'], 'proxy' => $s['proxy']];
+                    $lbl = isset($s['label']) ? (string) $s['label'] : '';
+                    if (empty($s['hls'])) return ['res' => $s['res'], 'url' => $s['url'], 'proxy' => $s['proxy'], 'label' => $lbl];
+                    // HLS dengan URL siap pakai (mis. WeTV) diteruskan apa adanya
+                    if ($s['url'] !== '') return ['res' => $s['res'], 'url' => $s['url'], 'proxy' => $s['proxy'], 'hls' => true, 'label' => $lbl];
                     // Playlist disajikan server kita (tautan bertanda tangan, berlaku 3 jam)
                     $u = base_url('api/?a=m3u8&' . http_build_query(sign_params(['p' => $prov->id, 'path' => $path, 'se' => $se, 'ep' => $ep], 10800)));
                     return ['res' => $s['res'], 'url' => $u, 'proxy' => $u . '&via=p', 'hls' => true];
@@ -416,6 +425,7 @@ function srt_to_vtt($srt)
     $srt = preg_replace('/^\xEF\xBB\xBF/', '', $srt);
     if (!mb_check_encoding($srt, 'UTF-8')) $srt = mb_convert_encoding($srt, 'UTF-8', 'Windows-1252');
     $srt = str_replace(["\r\n", "\r"], "\n", $srt);
+    if (strpos(ltrim($srt), 'WEBVTT') === 0) return $srt; // sudah WebVTT
     $srt = preg_replace('/(\d{2}:\d{2}:\d{2}),(\d{3})/', '$1.$2', $srt);
     return "WEBVTT\n\n" . trim($srt) . "\n";
 }

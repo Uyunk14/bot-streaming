@@ -39,12 +39,14 @@ function indocast_call($method, $path, array $params = [], $ttl = 600, $force = 
     stat_inc('api_calls');
 
     $j = $res['json'];
-    if (!$j || !isset($j['code']) || (int) $j['code'] !== 0) {
+    // Dua bentuk jawaban: {"code":0,"data":...} atau {"success":true, ...} (mis. WeTV, data bisa di akar)
+    $good = $j && ((isset($j['code']) && (int) $j['code'] === 0) || (!isset($j['code']) && !empty($j['success'])));
+    if (!$good) {
         $msg = $j && isset($j['message']) ? $j['message'] : ($res['error'] ?: 'HTTP ' . $res['code']);
         app_log('indocast', $method . ' ' . $path . ' ' . json_encode($params) . ' -> ' . $msg);
         return ['ok' => false, 'data' => null, 'error' => 'Sumber film sedang bermasalah (' . $msg . ')'];
     }
-    $data = isset($j['data']) ? $j['data'] : null;
+    $data = isset($j['code']) ? (isset($j['data']) ? $j['data'] : null) : (isset($j['data']) ? $j['data'] : $j);
     if ($ttl > 0 && $data !== null) cache_set($ckey, $data, $ttl);
     return ['ok' => true, 'data' => $data, 'error' => ''];
 }
@@ -76,6 +78,8 @@ function provider_registry()
     return [
         'filmbox' => ['name' => 'Filmbox', 'note' => 'Film, series, anime'],
         'iqiyi' => ['name' => 'iQIYI', 'note' => 'Drama China/Korea, anime, variety (HLS)', 'hls' => true],
+        'wetv' => ['name' => 'WeTV', 'note' => 'Drama China, anime, variety (HLS)', 'hls' => true],
+        'animekompi' => ['name' => 'Animekompi', 'note' => 'Anime subtitle Indonesia (MP4)'],
         'primevideo' => ['name' => 'Prime Video', 'note' => 'Film & serial Amazon (DRM: diputar di Chrome Android, tidak bisa di iPhone)', 'external' => true],
     ];
 }

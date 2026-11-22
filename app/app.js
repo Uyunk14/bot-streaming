@@ -71,6 +71,9 @@
     // Gambar Amazon (Prime Video): sisipkan ._SX<lebar>_ (±1-2 MB -> ±20 KB)
     var am = src && src.indexOf('._') < 0 && /^(https:\/\/[a-z0-9.-]+amazon\.com\/images\/S\/[^?]+)\.(jpe?g|png)$/i.exec(src);
     if (am) return am[1] + '._SX' + (w ? Math.max(w, 300) : 360) + '_.' + am[2];
+    // Poster WeTV ".../0" = ukuran asli (±600 KB) -> /220 (±37 KB) atau /350 (±75 KB)
+    var wv = src && /^(https:\/\/vcover-vt-pic\.wetvinfo\.com\/.+)\/0$/i.exec(src);
+    if (wv) return wv[1] + '/' + ((w || 240) > 240 ? 350 : 220);
     // Banner iQIYI "_xxx" = ukuran asli (±400 KB) -> versi 16:9 lebih kecil (±55 KB)
     var iq = src && /^(https:\/\/pic\d*\.iqiyipic\.com\/.+)_xxx\.jpg$/i.exec(src);
     if (iq) { var iw = (w || 480) > 480 ? 720 : 480; return iq[1] + '_' + iw + '_' + Math.round(iw * 9 / 16) + '.jpg'; }
@@ -501,7 +504,8 @@
     var failed = function () {
       if (!document.body.contains(vid)) return;
       if (!cur.useProxy && srcs[cur.q].proxy) { cur.useProxy = true; load(true); }
-      else toast('Video gagal dimuat. Coba kualitas lain.');
+      else if (!cur.auto && srcs[cur.q + 1]) { cur.auto = true; cur.q++; cur.useProxy = false; toast('Pindah ke ' + (srcs[cur.q].label || 'server lain') + '…'); drawOpts(); load(true); }
+      else toast('Video gagal dimuat. Coba kualitas/server lain.');
     };
     var load = function (keepTime) {
       var t = keepTime ? vid.currentTime : resume;
@@ -581,7 +585,7 @@
     var drawOpts = function () {
       opts.innerHTML = (preview ? '<div class="card" style="font-size:13px;line-height:1.5">Mode gratis: bisa ditonton <b>' + Math.round(preview / 60) + ' menit</b> pertama. <a href="#/vip" style="color:var(--accent);font-weight:700">Jadi VIP</a> untuk menonton penuh.</div><div style="height:16px"></div>' : '') +
         '<div class="label">Kualitas</div><div class="pills">' + srcs.map(function (s, i) {
-          return '<button class="pill' + (i === cur.q ? ' on' : '') + '" data-q="' + i + '">' + (s.res ? s.res + 'p' : 'Auto') + '</button>';
+          return '<button class="pill' + (i === cur.q ? ' on' : '') + '" data-q="' + i + '">' + esc(s.label || (s.res ? s.res + 'p' : 'Auto')) + '</button>';
         }).join('') + '</div>' +
         (subs.length ? '<div class="label" style="margin-top:16px">Subtitle</div><div class="pills">' + subs.slice(0, 6).map(function (s) {
           return '<button class="pill' + (s.lang === cur.sub ? ' on' : '') + '" data-sub="' + esc(s.lang) + '">' + esc(s.label) + '</button>';

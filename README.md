@@ -1,6 +1,6 @@
 # Bot Streaming + Mini App Telegram
 
-Bot Telegram untuk menonton film/drama/anime lewat Mini App. Sumber film dari API Indocast (provider: Filmbox, iQIYI, Prime Video).
+Bot Telegram untuk menonton film/drama/anime lewat Mini App. Sumber film dari API Indocast (provider: Filmbox, iQIYI, WeTV, Animekompi, Prime Video).
 PHP murni + MySQL, jalan di cPanel (PHP 7.4 – 8.4). Semua pengaturan (token bot, API key, warna, paket VIP, QRIS)
 diatur dari **web admin**, bukan di file.
 

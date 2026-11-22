@@ -60,6 +60,8 @@ try {
     if ((int) date('i') === 0) {
         q("UPDATE payments SET status = 'expired' WHERE status = 'pending' AND expires_at < DATE_SUB(NOW(), INTERVAL 1 DAY)");
         q("DELETE FROM views WHERE d < DATE_SUB(CURDATE(), INTERVAL 90 DAY)");
+        require_once dirname(__DIR__) . '/lib/imgproxy.php';
+        $out['img_cleaned'] = img_cleanup();
     }
 } catch (Exception $e) {
     app_log('cron', $e->getMessage());
