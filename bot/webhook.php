@@ -54,6 +54,17 @@ try {
             $t = "Status: <b>Gratis</b>\nEpisode 1 tiap series gratis dan film bisa dicoba " . (int) setting('free_minutes', '2') . " menit.\nJadi VIP untuk menonton semuanya.";
         }
         tg_send($chat, $t, tg_app_button(user_is_vip($user) ? '🎬 Buka Aplikasi' : '👑 Jadi VIP', user_is_vip($user) ? '' : '/vip'));
+    } elseif ($cmd === '/drmtest' && in_array((string) $msg['from']['id'], array_map('trim', explode(',', setting('admin_ids'))), true)) {
+        // Uji DRM Prime Video (khusus admin). Format: /drmtest [id_judul] [episode]
+        $parts = preg_split('/\s+/', $text);
+        $tid = isset($parts[1]) && preg_match('/^[A-Za-z0-9]{6,40}$/', $parts[1]) ? $parts[1] : '0NKUDJIM5VAE9079ZGUUVI3SS4';
+        $ep = isset($parts[2]) ? max(1, (int) $parts[2]) : 1;
+        $q = http_build_query(sign_params(['t' => 'pv', 'id' => $tid, 'ep' => $ep], 21600));
+        $url = base_url('app/drmtest.html?' . $q);
+        tg_send($chat, "🧪 <b>Tes DRM Prime Video</b>\nJudul: <code>" . e($tid) . "</code> · episode $ep\n\n1) Tekan <b>Tes di Telegram</b>.\n2) Bandingkan dengan <b>Buka di Chrome</b>.\nKirim screenshot hasilnya. Tautan berlaku 6 jam.", ['inline_keyboard' => [
+            [['text' => '🧪 Tes di Telegram', 'web_app' => ['url' => $url]]],
+            [['text' => '🌐 Buka di Chrome', 'url' => $url]],
+        ]]);
     } elseif ($cmd === '/help' || $cmd === '/bantuan') {
         tg_send($chat, "<b>$botName</b>\n/start — buka aplikasi\n/vip — cek status VIP\n\nCari judul langsung di aplikasi lewat tombol di bawah.", tg_app_button());
     } else {

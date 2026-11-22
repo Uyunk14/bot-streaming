@@ -59,6 +59,27 @@ try {
         exit;
     }
 
+    /* ---------- UJI DRM Prime Video (tautan bertanda tangan dari /drmtest admin) ---------- */
+    if ($action === 'pv_info' || $action === 'pv_license') {
+        require_once dirname(__DIR__) . '/lib/primevideo.php';
+        if ($action === 'pv_info') {
+            if (!verify_params(array_intersect_key($_GET, array_flip(['t', 'id', 'ep', 'x', 's']))) || $_GET['t'] !== 'pv') fail('Tautan tes kedaluwarsa. Kirim /drmtest lagi ke bot.', 403);
+            $r = pv_test_info($_GET['id'], isset($_GET['ep']) ? (int) $_GET['ep'] : 1);
+            if (!$r['ok']) fail($r['error'], 502);
+            ok(['data' => $r['data']]);
+        }
+        if (!verify_params(array_intersect_key($_GET, array_flip(['t', 'eid', 'sid', 'x', 's']))) || $_GET['t'] !== 'pvl') { http_response_code(403); exit; }
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); exit; }
+        $body = file_get_contents('php://input');
+        if ($body === '' || strlen($body) > 65536) { http_response_code(400); exit; }
+        $r = pv_license_forward($_GET['eid'], $_GET['sid'], $body);
+        http_response_code($r['code']);
+        header('Content-Type: ' . $r['type']);
+        header('Cache-Control: no-store');
+        echo $r['body'];
+        exit;
+    }
+
     /* ---------- Playlist HLS (provider berbasis m3u8, mis. iQIYI) ---------- */
     if ($action === 'm3u8') {
         if (!verify_params(array_intersect_key($_GET, array_flip(['p', 'path', 'se', 'ep', 'x', 's'])))) {

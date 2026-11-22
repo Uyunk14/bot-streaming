@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tes DRM</title>
+<style>
+  :root { --bg:#0E0F13; --card:#181A21; --line:#262934; --text:#ECEDF2; --muted:#9097A8; --ok:#22C55E; --bad:#EF4444; --warn:#F59E0B; --accent:#6A4DF4; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:640px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
+  h1 { font-size:18px; margin:0; }
+  .muted { color:var(--muted); font-size:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  video { width:100%; aspect-ratio:16/9; background:#000; border-radius:12px; display:block; }
+  .verdict { font-weight:800; font-size:16px; padding:12px; border-radius:12px; text-align:center; background:var(--card); border:1px solid var(--line); }
+  .verdict.ok { background:rgba(34,197,94,.15); border-color:var(--ok); color:var(--ok); }
+  .verdict.bad { background:rgba(239,68,68,.12); border-color:var(--bad); color:var(--bad); }
+  #log { font:12px/1.55 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-word; margin:0; }
+  .g { color:var(--ok); } .r { color:var(--bad); } .y { color:var(--warn); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  button { flex:1; min-height:40px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; font-size:14px; }
+  button.ghost { background:var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div><h1>🧪 Tes DRM Prime Video</h1><div class="muted" id="sub">Menyiapkan…</div></div>
+  <video id="v" controls playsinline></video>
+  <div class="verdict" id="verdict">Sedang mengetes…</div>
+  <div class="row"><button id="again">Ulangi tes</button><button class="ghost" id="copy">Salin log</button></div>
+  <div class="card"><pre id="log"></pre></div>
+</div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(function () {
+  var TG = window.Telegram && Telegram.WebApp;
+  try { if (TG) { TG.ready(); TG.expand(); } } catch (e) {}
+  var SHAKA = 'https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.12.6/shaka-player.compiled.js';
+  var $log = document.getElementById('log'), $v = document.getElementById('v'), $verdict = document.getElementById('verdict');
+  var t0 = Date.now(), done = false, player = null, info = null;
+
+  function log(msg, cls) {
+    var s = '[' + ((Date.now() - t0) / 1000).toFixed(1) + 's] ' + msg;
+    var el = document.createElement('span'); if (cls) el.className = cls; el.textContent = s + '\n';
+    $log.appendChild(el);
+  }
+  function verdict(ok, text) {
+    if (done && !ok) return;
+    done = ok || done;
+    $verdict.className = 'verdict ' + (ok ? 'ok' : 'bad');
+    $verdict.textContent = text;
+  }
+  function b64(s) { var bin = atob(s), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+
+  function env() {
+    log('Perangkat: ' + navigator.userAgent);
+    log('Telegram: ' + (TG && TG.platform && TG.platform !== 'unknown' ? TG.platform + ' (versi ' + TG.version + ')' : 'tidak (browser biasa)'));
+    log('MediaSource: ' + (window.MediaSource ? 'ada' : 'TIDAK ADA'), window.MediaSource ? 'g' : 'r');
+    log('EME (requestMediaKeySystemAccess): ' + (navigator.requestMediaKeySystemAccess ? 'ada' : 'TIDAK ADA'), navigator.requestMediaKeySystemAccess ? 'g' : 'r');
+  }
+
+  function checkKS() {
+    if (!navigator.requestMediaKeySystemAccess) return Promise.resolve({});
+    var vc = function (rob) { return [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.4D401E"', robustness: rob }], audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"', robustness: rob ? 'SW_SECURE_CRYPTO' : '' }] }]; };
+    var tests = [
+      ['Widevine L1 (HW_SECURE_ALL)', 'com.widevine.alpha', 'HW_SECURE_ALL'],
+      ['Widevine L3 (SW_SECURE_CRYPTO)', 'com.widevine.alpha', 'SW_SECURE_CRYPTO'],
+      ['PlayReady', 'com.microsoft.playready', ''],
+      ['FairPlay (Apple)', 'com.apple.fps', '']
+    ];
+    var res = {};
+    return tests.reduce(function (p, t) {
+      return p.then(function () {
+        return navigator.requestMediaKeySystemAccess(t[1], vc(t[2])).then(function () { res[t[0]] = true; log(t[0] + ': DIDUKUNG', 'g'); },
+          function () { res[t[0]] = false; log(t[0] + ': tidak', t[1] === 'com.widevine.alpha' ? 'y' : ''); });
+      });
+    }, Promise.resolve()).then(function () { return res; });
+  }
+
+  function loadShaka() {
+    return new Promise(function (ok, no) {
+      if (window.shaka) return ok();
+      var s = document.createElement('script'); s.src = SHAKA; s.onload = ok; s.onerror = function () { no(new Error('Gagal memuat Shaka Player')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function getInfo() {
+    return fetch('../api/?a=pv_info&' + location.search.slice(1)).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw new Error(j.error || 'Gagal mengambil data');
+      return j.data;
+    });
+  }
+
+  function play(url, label) {
+    log('— Memutar lewat ' + label + ' —');
+    var p = player;
+    return p.load(url, null, 'application/dash+xml').then(function () {
+      var tr = p.getVariantTracks().filter(function (t) { return t.active; })[0];
+      log('Manifest + lisensi OK. Track aktif: ' + (tr ? tr.width + 'x' + tr.height + ' @' + Math.round(tr.bandwidth / 1000) + 'kbps' : '?'), 'g');
+      var hs = p.getVariantTracks().map(function (t) { return t.height; }).filter(function (h, i, a) { return a.indexOf(h) === i; }).sort(function (a, b) { return b - a; });
+      log('Resolusi yang bisa diputar: ' + hs.join(', '));
+      var pr = $v.play(); if (pr && pr.catch) pr.catch(function () { log('Autoplay ditahan browser — tekan ▶ pada video.', 'y'); });
+      return true;
+    });
+  }
+
+  function errText(e) {
+    if (e && e.code) {
+      var n = ''; try { for (var k in shaka.util.Error.Code) if (shaka.util.Error.Code[k] === e.code) n = k; } catch (x) {}
+      return 'Shaka error ' + e.code + (n ? ' (' + n + ')' : '') + ' data=' + JSON.stringify(e.data || []).slice(0, 300);
+    }
+    return String(e && e.message || e);
+  }
+
+  function run() {
+    done = false; $log.textContent = ''; t0 = Date.now();
+    $verdict.className = 'verdict'; $verdict.textContent = 'Sedang mengetes…';
+    env();
+    checkKS().then(function (ks) {
+      if (!ks['Widevine L1 (HW_SECURE_ALL)'] && !ks['Widevine L3 (SW_SECURE_CRYPTO)']) {
+        verdict(false, '❌ Perangkat/aplikasi ini TIDAK mendukung Widevine');
+      }
+      log('Mengambil data video dari server…');
+      return Promise.all([getInfo(), loadShaka()]);
+    }).then(function (r) {
+      info = r[0];
+      document.getElementById('sub').textContent = info.title + ' · ' + info.episode + (info.audio ? ' · audio ' + info.audio : '');
+      log('Judul: ' + info.title + ' (' + info.episode + '), DRM: ' + (info.drm ? 'ya' : 'tidak'));
+      log('Subtitle tersedia: ' + (info.subtitles.map(function (s) { return s.lang + '/' + s.format; }).join(', ') || '-'));
+      shaka.polyfill.installAll();
+      if (!shaka.Player.isBrowserSupported()) throw new Error('Shaka: browser tidak didukung');
+      log('Shaka Player ' + shaka.Player.version + ' siap.');
+      player = new shaka.Player();
+      return player.attach($v).then(function () {
+        var cfg = { drm: { servers: { 'com.widevine.alpha': info.license }, advanced: { 'com.widevine.alpha': { videoRobustness: 'SW_SECURE_CRYPTO', audioRobustness: 'SW_SECURE_CRYPTO' } } }, streaming: { bufferingGoal: 20 } };
+        if (info.cert) cfg.drm.advanced['com.widevine.alpha'].serverCertificate = b64(info.cert);
+        player.configure(cfg);
+        player.getNetworkingEngine().registerResponseFilter(function (type, resp) {
+          if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) log('Lisensi diterima (' + resp.data.byteLength + ' byte).', 'g');
+        });
+        player.addEventListener('error', function (ev) { log(errText(ev.detail), 'r'); });
+        player.addEventListener('keystatuschanged', function () {
+          try { var m = player.getKeyStatuses(); log('Status kunci: ' + JSON.stringify(m), JSON.stringify(m).indexOf('usable') >= 0 ? 'g' : 'y'); } catch (x) {}
+        });
+        return play(info.stream, 'CDN langsung').catch(function (e) {
+          log('Gagal: ' + errText(e), 'r');
+          if (!info.stream_proxy || (e && e.code === 6001)) throw e;
+          return play(info.stream_proxy, 'proxy Indocast');
+        });
+      });
+    }).catch(function (e) {
+      log('GAGAL: ' + errText(e), 'r');
+      verdict(false, '❌ Video tidak bisa diputar — kirim screenshot log ini');
+    });
+  }
+
+  var shown = false;
+  $v.addEventListener('timeupdate', function () {
+    if (!shown && $v.currentTime > 3) {
+      shown = true;
+      var h = $v.videoHeight;
+      log('Video BERJALAN (' + $v.videoWidth + 'x' + h + ').', 'g');
+      verdict(true, '✅ BERHASIL — video DRM bisa diputar (' + h + 'p)');
+    }
+  });
+  $v.addEventListener('waiting', function () { if (!shown) log('Memuat video…'); });
+
+  document.getElementById('again').onclick = function () {
+    shown = false;
+    (player ? player.destroy() : Promise.resolve()).then(function () { player = null; run(); });
+  };
+  document.getElementById('copy').onclick = function () {
+    var t = $log.textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { alert('Log disalin.'); }, function () { alert('Tidak bisa menyalin, kirim screenshot saja.'); });
+  };
+  run();
+})();
+</script>
+</body>
+</html>
