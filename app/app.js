@@ -66,7 +66,14 @@
 
   function detailHref(p, it) { return '#/d/' + enc(p) + '/' + enc(it.id) + '/' + enc(it.path); }
   function watchHref(p, id, path, se, ep) { return '#/w/' + enc(p) + '/' + enc(id) + '/' + enc(path) + '/' + se + '/' + ep; }
-  function img(src, alt) { return src ? '<img loading="lazy" src="' + esc(src) + '" alt="' + esc(alt || '') + '">' : ''; }
+  // Gambar dari CDN aoneroom bisa diperkecil + WebP (±185 KB -> ±8 KB per poster)
+  function thumb(src, w) {
+    if (!src || !/^https:\/\/[a-z0-9.-]*aoneroom\.com\//i.test(src) || src.indexOf('?') >= 0) return src;
+    return src + '?x-oss-process=image/resize,w_' + (w || 240) + '/quality,q_80/format,webp';
+  }
+  function img(src, alt, w, eager) {
+    return src ? '<img ' + (eager ? 'fetchpriority="high"' : 'loading="lazy"') + ' decoding="async" src="' + esc(thumb(src, w)) + '" alt="' + esc(alt || '') + '">' : '';
+  }
 
   function posterHTML(p, it) {
     var tag = it.type === 2 ? 'Series' : '';
@@ -174,8 +181,8 @@
     var draw = function (j) {
       if (!j.ok) { $view.innerHTML = head + errBox(j.error); bindProv(); return; }
       var d = j.data, prov = S.prov;
-      var hero = d.hero.length ? '<div class="hero" id="hero">' + d.hero.map(function (it) {
-        return '<a class="hero-item" href="' + detailHref(prov, it) + '">' + img(it.cover, it.title) + '<div class="shade"></div><div class="info">' +
+      var hero = d.hero.length ? '<div class="hero" id="hero">' + d.hero.map(function (it, i) {
+        return '<a class="hero-item" href="' + detailHref(prov, it) + '">' + img(it.cover, it.title, 720, i === 0) + '<div class="shade"></div><div class="info">' +
           '<span class="m">' + esc([it.genre, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join(' · ')) + '</span>' +
           '<span class="t">' + esc(it.title) + '</span>' +
           '<span><span class="btn btn-accent" style="height:36px;font-size:13px">' + ICON.play + 'Tonton</span></span></div></a>';
@@ -183,7 +190,7 @@
       var cont = (j.continue || []).filter(function (h) { return h.provider === prov; });
       var contHTML = cont.length ? '<div class="sec"><div class="pad"><span class="h2">Lanjut Nonton</span></div><div class="hscroll">' + cont.map(function (h) {
         var pct = h.duration ? Math.min(100, Math.round(h.position / h.duration * 100)) : 0;
-        return '<a class="cont" href="' + watchHref(h.provider, h.id, h.path, h.se, h.ep) + '"><div class="img">' + img(h.cover, h.title) +
+        return '<a class="cont" href="' + watchHref(h.provider, h.id, h.path, h.se, h.ep) + '"><div class="img">' + img(h.cover, h.title, 400) +
           '<div class="bar" style="width:' + pct + '%"></div></div><span class="name">' + esc(h.title) + ' · ' + epLabel(+h.type, h.se, h.ep) + '</span></a>';
       }).join('') + '</div></div>' : '';
       var secs = d.sections.map(function (s) {
@@ -196,17 +203,42 @@
     };
     var bindProv = function () {
       $view.querySelectorAll('[data-prov]').forEach(function (b) {
-        b.onclick = function () { S.prov = b.getAttribute('data-prov'); renderHome(); };
+        b.onclick = function () {
+          S.prov = b.getAttribute('data-prov');
+          try { localStorage.setItem('prov', S.prov); } catch (e) {}
+          renderHome();
+        };
       });
     };
-    var cached = S.homeCache[S.prov];
-    if (cached && Date.now() - cached.t < 120000) return draw(cached.j);
-    $view.innerHTML = head + '<div class="center-load"><div class="spinner"></div></div>';
-    bindProv();
-    api('home', { p: S.prov }).then(function (j) {
-      if (j.ok) S.homeCache[S.prov] = { t: Date.now(), j: j };
-      if (parseHash().parts.length === 0) draw(j);
+    // 1) cache di memori (pindah halaman bolak-balik)
+    var prov = S.prov;
+    var mem = S.homeCache[prov];
+    if (mem && Date.now() - mem.t < 300000) return draw(mem.j);
+
+    // 2) cache di HP (localStorage): tampil instan saat Mini App dibuka, lalu diperbarui diam-diam
+    var stored = homeStore(prov);
+    if (stored) draw(stored);
+    else { $view.innerHTML = head + '<div class="center-load"><div class="spinner"></div></div>'; bindProv(); }
+
+    // 3) data terbaru dari server (memakai prefetch yang sudah jalan sejak aplikasi dibuka)
+    var req = (S.prefetch && S.prefetch.prov === prov) ? S.prefetch.req : api('home', { p: prov });
+    S.prefetch = null;
+    req.then(function (j) {
+      if (j.ok) { S.homeCache[prov] = { t: Date.now(), j: j }; homeStore(prov, j); }
+      if (parseHash().parts.length !== 0 || S.prov !== prov) return;
+      if (!stored) return draw(j);
+      // Gambar ulang hanya bila isinya berubah dan pengguna belum menggulir
+      if (j.ok && JSON.stringify(j.data) + JSON.stringify(j.continue) !== JSON.stringify(stored.data) + JSON.stringify(stored.continue) && window.scrollY < 40) draw(j);
     });
+  }
+
+  function homeStore(prov, j) {
+    var key = 'home2:' + prov;
+    try {
+      if (j) { localStorage.setItem(key, JSON.stringify({ ok: true, data: j.data, continue: j.continue })); return; }
+      var v = JSON.parse(localStorage.getItem(key) || 'null');
+      return v && v.ok && v.data ? v : null;
+    } catch (e) { return null; }
   }
 
   function autoHero() {
@@ -302,7 +334,7 @@
       var playHref = canWatch(d, start.se, start.ep) ? watchHref(p, d.id, d.path, start.se, start.ep) : '#/vip';
       var meta = [d.rating ? '<span class="star">★ ' + d.rating + '</span>' : '', d.year, d.country, d.type === 2 ? 'Series' : 'Film'].filter(Boolean).join('<span>·</span>');
       var genres = (d.genre || '').split(',').map(function (g) { return g.trim(); }).filter(Boolean).map(function (g) { return '<span>' + esc(g) + '</span>'; }).join('');
-      var html = '<div class="backdrop">' + img(d.cover, d.title) + '<div class="shade"></div><button class="backbtn" id="bk" aria-label="Kembali">' + ICON.back + '</button></div>' +
+      var html = '<div class="backdrop">' + img(d.cover, d.title, 720, true) + '<div class="shade"></div><button class="backbtn" id="bk" aria-label="Kembali">' + ICON.back + '</button></div>' +
         '<div class="dhead"><h1 class="h1">' + esc(d.title) + '</h1><div class="meta">' + meta + '</div>' +
         (genres ? '<div class="genres">' + genres + '</div>' : '') +
         '<div class="actions"><a class="btn btn-accent" href="' + playHref + '">' + (playHref === '#/vip' ? ICON.lock : ICON.play) + esc(playLabel) + '</a>' +
@@ -496,7 +528,7 @@
   function playerHTML(poster) {
     return '<div class="player" id="pl">' +
       '<video id="vid" playsinline webkit-playsinline preload="metadata" disablepictureinpicture disableremoteplayback ' +
-      'controlslist="nodownload noplaybackrate noremoteplayback" poster="' + esc(poster) + '"></video>' +
+      'controlslist="nodownload noplaybackrate noremoteplayback" poster="' + esc(thumb(poster, 720)) + '"></video>' +
       '<div class="pc" id="pc">' +
         '<div class="pc-spin" id="pcSpin"><div class="spinner"></div></div>' +
         '<div class="pc-mid">' +
@@ -707,6 +739,15 @@
     });
   }
 
+  // Pustaka QR baru dimuat saat dibutuhkan (tidak memperlambat pembukaan aplikasi)
+  function loadScript(src, cb) {
+    if (window.QRCode) return cb(true);
+    var s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = function () { cb(true); }; s.onerror = function () { cb(false); };
+    document.head.appendChild(s);
+  }
+
   function paySheet(pay) {
     var bg = document.createElement('div'); bg.className = 'sheet-bg';
     bg.innerHTML = '<div class="sheet" id="sheet"></div>';
@@ -721,8 +762,11 @@
         '<span class="note">Bayar <b>tepat</b> sesuai nominal di atas pakai e-wallet atau m-banking apa saja.<br>VIP aktif otomatis setelah pembayaran masuk.</span>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;margin-top:6px"><button class="btn btn-line" id="cancel">Batalkan</button>' +
         '<button class="btn" style="background:#065AD8;color:#fff" id="check">Cek status</button></div>';
-      try { new QRCode(document.getElementById('qr'), { text: pay.qris, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M }); }
-      catch (e) { document.getElementById('qr').textContent = 'QR gagal dibuat.'; }
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js', function (ok) {
+        var box = document.getElementById('qr'); if (!box) return;
+        try { if (!ok) throw 0; new QRCode(box, { text: pay.qris, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M }); }
+        catch (e) { box.textContent = 'QR gagal dimuat, tekan Cek status lalu coba lagi.'; }
+      });
       var cd = document.getElementById('cd');
       var upd = function () {
         var s = pay.expires_at - Math.floor(Date.now() / 1000);
@@ -789,7 +833,7 @@
       $l.innerHTML = j.items.map(function (it) {
         var href = tab === 'fav' ? detailHref(it.provider, it) : watchHref(it.provider, it.id, it.path, it.se, it.ep);
         var pct = it.duration ? Math.min(100, Math.round(it.position / it.duration * 100)) : 0;
-        return '<a class="hitem" href="' + href + '"><div class="img">' + img(it.cover, it.title) + '</div><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">' +
+        return '<a class="hitem" href="' + href + '"><div class="img">' + img(it.cover, it.title, 160) + '</div><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">' +
           '<b style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(it.title) + '</b>' +
           '<span class="muted" style="font-size:12px">' + (tab === 'fav' ? (+it.type === 2 ? 'Series' : 'Film') : epLabel(+it.type, it.se, it.ep)) + '</span>' +
           (tab === 'fav' ? '' : '<div class="prog"><i style="width:' + pct + '%"></i></div>') + '</div><span class="muted">' + ICON.chev + '</span></a>';
@@ -808,13 +852,39 @@
       $view.innerHTML = '<div class="empty" style="padding-top:30vh">Buka aplikasi ini dari bot Telegram.</div>';
       return;
     }
+    // Beranda diminta BERSAMAAN dengan boot (bukan menunggu boot selesai)
+    var lastProv = 'filmbox';
+    try { lastProv = localStorage.getItem('prov') || 'filmbox'; } catch (e) {}
+    if (parseHash().parts.length === 0) S.prefetch = { prov: lastProv, req: api('home', { p: lastProv }) };
+
+    // Data boot terakhir disimpan di HP -> tampilan langsung muncul tanpa menunggu server
+    var cachedBoot = null;
+    try { cachedBoot = JSON.parse(localStorage.getItem('boot2') || 'null'); } catch (e) {}
+    var begin = function (b) {
+      S.boot = b;
+      applyTheme(b.app);
+      var ids = b.app.providers.map(function (p) { return p.id; });
+      S.prov = ids.indexOf(lastProv) >= 0 ? lastProv : (ids[0] || 'filmbox');
+      route();
+    };
+    if (cachedBoot && cachedBoot.app && cachedBoot.user) {
+      cachedBoot.gate = { required: false, ok: true, items: [] }; // dicek ulang oleh boot asli di bawah
+      begin(cachedBoot);
+    }
     api('boot').then(function (j) {
-      if (!j.ok) { $view.innerHTML = '<div style="padding-top:25vh"></div>' + errBox(j.error); return; }
+      if (!j.ok) {
+        if (!cachedBoot) $view.innerHTML = '<div style="padding-top:25vh"></div>' + errBox(j.error);
+        else if (j._status === 401 || j._status === 403) { S.boot = null; $view.innerHTML = '<div style="padding-top:25vh"></div>' + errBox(j.error); $tab.hidden = true; }
+        return;
+      }
+      try { localStorage.setItem('boot2', JSON.stringify({ app: j.app, user: j.user })); } catch (e) {}
+      if (!cachedBoot) return begin(j);
+      var old = S.boot;
       S.boot = j;
       applyTheme(j.app);
-      if (j.app.providers.length) S.prov = j.app.providers[0].id;
-      // start_param dari tautan t.me/bot/app?startapp=...
-      route();
+      var needRedraw = (j.gate.required && !j.gate.ok) || old.user.vip !== j.user.vip || old.app.name !== j.app.name
+        || JSON.stringify(old.app.providers) !== JSON.stringify(j.app.providers);
+      if (needRedraw) { S.homeCache = {}; route(); }
     });
     window.addEventListener('hashchange', route);
   }

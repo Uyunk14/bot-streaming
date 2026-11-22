@@ -38,6 +38,17 @@ try {
         if ($n['status'] === 'expired') $out['expired']++;
     }
 
+    // 1b. Panaskan cache beranda tiap 10 menit supaya pembuka Mini App tidak menunggu Indocast
+    $out['home_refreshed'] = [];
+    foreach (providers_enabled() as $pid => $info) {
+        if (cache_get('warm:' . $pid) !== null) continue;
+        $prov = provider_get($pid);
+        if ($prov && $prov->home(true)['ok']) {
+            cache_set('warm:' . $pid, 1, 600);
+            $out['home_refreshed'][] = $pid;
+        }
+    }
+
     // 2. Broadcast (maks ±40 detik per menit)
     $out['broadcast'] = broadcast_process(40);
 

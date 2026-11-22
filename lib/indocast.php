@@ -11,7 +11,7 @@ require_once __DIR__ . '/core.php';
  * Panggil API Indocast dengan cache.
  * @return array ['ok'=>bool, 'data'=>mixed, 'error'=>string]
  */
-function indocast_call($method, $path, array $params = [], $ttl = 600)
+function indocast_call($method, $path, array $params = [], $ttl = 600, $force = false)
 {
     $key = setting('indocast_key');
     if ($key === '') return ['ok' => false, 'data' => null, 'error' => 'API key Indocast belum diisi di admin.'];
@@ -20,7 +20,7 @@ function indocast_call($method, $path, array $params = [], $ttl = 600)
     $url = $base . '/' . ltrim($path, '/');
     $ckey = 'ic:' . $method . ':' . $path . ':' . json_encode($params);
 
-    if ($ttl > 0) {
+    if ($ttl > 0 && !$force) {
         $hit = cache_get($ckey);
         if ($hit !== null) {
             stat_inc('cache_hits');
@@ -53,7 +53,8 @@ abstract class BaseProvider
 {
     public $id = '';
     public $name = '';
-    abstract public function home();
+    /** @param bool $force ambil ulang dari Indocast (dipakai cron untuk memanaskan cache) */
+    abstract public function home($force = false);
     abstract public function search($keyword, $page, $type);
     abstract public function detail($id, $path);
     abstract public function play($id, $path, $se, $ep, $lang);

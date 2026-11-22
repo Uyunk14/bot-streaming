@@ -37,10 +37,21 @@ class Provider_filmbox extends BaseProvider
         return $it['id'] !== '' && $it['id'] !== '0' && $it['path'] !== '' && in_array($it['type'], [1, 2], true);
     }
 
-    public function home()
+    public function home($force = false)
     {
-        $r = indocast_call('GET', 'filmbox/home', [], 900);
-        if (!$r['ok']) return $r;
+        // Hasil olahan beranda disimpan 6 jam; cron memperbaruinya tiap 10 menit,
+        // jadi pembuka Mini App hampir tidak pernah menunggu Indocast.
+        $ck = 'home:filmbox:v2';
+        if (!$force) {
+            $hit = cache_get($ck);
+            if ($hit !== null) { stat_inc('cache_hits'); return ['ok' => true, 'data' => $hit, 'error' => '']; }
+        }
+        $r = indocast_call('GET', 'filmbox/home', [], 0, true);
+        if (!$r['ok']) {
+            // Indocast gangguan: pakai salinan lama bila masih ada
+            $old = cache_get($ck . ':backup');
+            return $old !== null ? ['ok' => true, 'data' => $old, 'error' => ''] : $r;
+        }
         $d = $r['data'];
         $hero = [];
         foreach ((isset($d['hero_banners']) ? $d['hero_banners'] : []) as $b) {
@@ -59,11 +70,16 @@ class Provider_filmbox extends BaseProvider
                 $it = self::item($raw);
                 if (!self::valid($it) || isset($ids[$it['id']])) continue;
                 $ids[$it['id']] = 1;
+                unset($it['soon'], $it['country']); // tidak dipakai di beranda -> data lebih kecil
                 $items[] = $it;
+                if (count($items) >= 15) break;
             }
             if ($items) $sections[] = ['id' => (string) $sid, 'title' => trim((string) $s['section_title']), 'items' => $items];
         }
-        return ['ok' => true, 'data' => ['hero' => array_slice($hero, 0, 8), 'sections' => $sections], 'error' => ''];
+        $data = ['hero' => array_slice($hero, 0, 6), 'sections' => $sections];
+        cache_set($ck, $data, 21600);
+        cache_set($ck . ':backup', $data, 7 * 86400);
+        return ['ok' => true, 'data' => $data, 'error' => ''];
     }
 
     public function search($keyword, $page, $type)

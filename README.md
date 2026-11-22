@@ -44,6 +44,7 @@ diatur dari **web admin**, bukan di file.
 3. Centang provider di Admin → Pengaturan.
 
 ## Pengembangan
+- Setiap mengubah app.js/app.css, naikkan angka `?v=` di app/index.html (file JS/CSS disimpan lama di HP).
 - Lint wajib dua versi: `/c/php74/php.exe -l file.php` dan `/c/php84/php.exe -l file.php`.
 - Jangan tulis token/API key/password di file mana pun — semua di tabel `settings` (lewat admin).
 - Perubahan tabel: tambah di `db_migrate()` (`lib/core.php`) dan naikkan `SCHEMA_VER`.

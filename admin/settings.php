@@ -50,8 +50,7 @@ if ($act && csrf_check()) {
 
         case 'test_indocast':
             $p = provider_get('filmbox');
-            cache_del('ic:GET:filmbox/home:[]');
-            $r = $p ? $p->home() : ['ok' => false, 'error' => 'Provider tidak ada'];
+            $r = $p ? $p->home(true) : ['ok' => false, 'error' => 'Provider tidak ada'];
             if ($r['ok']) flash('Indocast tersambung: ' . count($r['data']['sections']) . ' kategori di beranda.');
             else flash($r['error'], 'err');
             break;
