@@ -114,6 +114,11 @@
     var oldVid = document.getElementById('vid');
     if (oldVid && !oldVid.paused) oldVid.pause(); // memicu simpan posisi tontonan
     Array.prototype.forEach.call(document.querySelectorAll('.sheet-bg'), function (el) { el.remove(); });
+    if (document.body.classList.contains('pfs-on')) {
+      document.body.classList.remove('pfs-on');
+      try { if (TG && TG.isFullscreen) TG.exitFullscreen(); } catch (x) {}
+    }
+    S.onBack = null;
     if (!S.boot) return;
     var r = parseHash();
     var p = r.parts;
@@ -607,59 +612,88 @@
     });
     menu.addEventListener('click', function (e) { e.stopPropagation(); });
 
-    // Tekan lama di video = 2x selama ditahan (seperti YouTube)
-    var holdT, holding = false, suppressClick = false;
-    var startHold = function (e) {
-      if (e.target.closest('button') || e.target.closest('.pc-bar') || e.target.closest('.pc-menu')) return;
+    // Posisi (0..1) di sepanjang sumbu horizontal elemen; di layar penuh yang diputar 90°
+    // sumbu horizontal pemutar = sumbu vertikal layar.
+    var along = function (el, cx, cy) {
+      var r = el.getBoundingClientRect();
+      var v = pl.classList.contains('rot') ? (cy - r.top) / r.height : (cx - r.left) / r.width;
+      return Math.max(0, Math.min(1, v));
+    };
+
+    // Tekan lama = 2x selama ditahan; ketuk = tampil/sembunyi kontrol; ketuk 2x kiri/kanan = ±10 dtk.
+    // Pakai event sentuh langsung (bukan klik) karena WebView Telegram Android membatalkan
+    // gestur tekan-lama bila dibiarkan ke perilaku bawaan.
+    var holdT, holding = false, lastTap = 0, tStart = null;
+    var startHold = function () {
       clearTimeout(holdT);
       holdT = setTimeout(function () {
         if (vid.paused) return;
-        holding = true; suppressClick = true;
+        holding = true;
         vid.playbackRate = 2; fast.hidden = false;
         pl.classList.remove('show'); haptic('medium');
       }, 450);
     };
     var endHold = function () {
       clearTimeout(holdT);
-      if (!holding) return;
+      if (!holding) return false;
       holding = false; vid.playbackRate = rate; fast.hidden = true;
+      return true;
     };
-    $('pc').addEventListener('pointerdown', startHold);
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { $('pc').addEventListener(ev, endHold); });
-    $('pc').addEventListener('pointermove', function (e) {
-      // geser jari (scroll) membatalkan tekan lama yang belum aktif
-      if (!holding && (Math.abs(e.movementX) > 6 || Math.abs(e.movementY) > 6)) clearTimeout(holdT);
-    });
-
-    // Ketuk area video: tampilkan/sembunyikan kontrol; ketuk dua kali kiri/kanan = mundur/maju 10 dtk
-    var lastTap = 0;
-    $('pc').addEventListener('click', function (e) {
-      if (suppressClick) { suppressClick = false; return; }
+    var tap = function (cx, cy) {
       if (!menu.hidden) { menu.hidden = true; return; }
-      if (e.target.closest('button') || e.target.closest('.pc-bar')) return;
-      var now = Date.now(), r = pl.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
-      if (now - lastTap < 300 && (x < 0.35 || x > 0.65)) {
+      var now = Date.now(), x = along(pl, cx, cy);
+      if (now - lastTap < 320 && (x < 0.35 || x > 0.65)) {
         var t = Math.max(0, Math.min(maxTime() || 1e9, vid.currentTime + (x < 0.5 ? -10 : 10)));
-        vid.currentTime = t; paint(t); show(); lastTap = 0; return;
+        vid.currentTime = t; paint(t); show(); lastTap = 0; haptic(); return;
       }
       lastTap = now;
       if (pl.classList.contains('show') && !vid.paused) { pl.classList.remove('show'); clearTimeout(hideT); } else show();
+    };
+    var onControl = function (t) { return t.closest && (t.closest('button') || t.closest('.pc-bar') || t.closest('.pc-menu')); };
+    var pc = $('pc');
+    pc.addEventListener('touchstart', function (e) {
+      if (onControl(e.target) || e.touches.length > 1) return;
+      e.preventDefault(); // cegah menu tekan-lama/seleksi bawaan & klik ganda
+      var p = e.touches[0];
+      tStart = { x: p.clientX, y: p.clientY, t: Date.now() };
+      startHold();
+    }, { passive: false });
+    pc.addEventListener('touchmove', function (e) {
+      if (!tStart || holding) return;
+      var p = e.touches[0];
+      if (Math.abs(p.clientX - tStart.x) > 12 || Math.abs(p.clientY - tStart.y) > 12) { clearTimeout(holdT); tStart.moved = true; }
+    }, { passive: true });
+    pc.addEventListener('touchend', function (e) {
+      if (!tStart) return;
+      var s = tStart; tStart = null;
+      if (endHold()) return;
+      var p = e.changedTouches[0];
+      if (!s.moved && Date.now() - s.t < 450) tap(p.clientX, p.clientY);
+    });
+    pc.addEventListener('touchcancel', function () { tStart = null; endHold(); });
+    // Mouse (komputer)
+    var mouseHeld = false;
+    pc.addEventListener('mousedown', function (e) { if (onControl(e.target) || e.button !== 0) return; mouseHeld = true; startHold(); });
+    window.addEventListener('mouseup', function () { if (mouseHeld) { mouseHeld = false; if (endHold()) pc._skipClick = true; } });
+    pc.addEventListener('click', function (e) {
+      if (pc._skipClick) { pc._skipClick = false; return; }
+      if (onControl(e.target)) return;
+      tap(e.clientX, e.clientY);
     });
 
     // Seek bar (sentuh & geser)
-    var ratioAt = function (clientX) { var r = bar.getBoundingClientRect(); return Math.max(0, Math.min(1, (clientX - r.left) / r.width)); };
-    var seekTo = function (clientX, commit) {
+    var seekTo = function (e, commit) {
       var d = dur(); if (!d) return;
-      var t = ratioAt(clientX) * d;
+      var t = along(bar, e.clientX, e.clientY) * d;
       if (preview && t > preview) t = Math.max(0, preview - 1);
       paint(t);
       if (commit) vid.currentTime = t;
     };
     bar.addEventListener('pointerdown', function (e) {
-      dragging = true; try { bar.setPointerCapture(e.pointerId); } catch (x) {} pl.classList.add('drag'); seekTo(e.clientX, false); show();
+      dragging = true; try { bar.setPointerCapture(e.pointerId); } catch (x) {} pl.classList.add('drag'); seekTo(e, false); show();
     });
-    bar.addEventListener('pointermove', function (e) { if (dragging) seekTo(e.clientX, false); });
-    var end = function (e) { if (!dragging) return; dragging = false; pl.classList.remove('drag'); seekTo(e.clientX, true); show(); };
+    bar.addEventListener('pointermove', function (e) { if (dragging) seekTo(e, false); });
+    var end = function (e) { if (!dragging) return; dragging = false; pl.classList.remove('drag'); seekTo(e, true); show(); };
     bar.addEventListener('pointerup', end);
     bar.addEventListener('pointercancel', end);
 
@@ -677,26 +711,52 @@
     vid.addEventListener('waiting', function () { spin.classList.add('on'); });
     ['playing', 'canplay', 'pause', 'error'].forEach(function (ev) { vid.addEventListener(ev, function () { spin.classList.remove('on'); }); });
 
-    // Layar penuh: seluruh kotak pemutar (supaya kontrol kustom ikut), putar ke landscape bila bisa
-    var isFs = function () { return document.fullscreenElement || document.webkitFullscreenElement; };
+    // Layar penuh.
+    // Di dalam Telegram, layar penuh bawaan browser tidak didukung WebView-nya, jadi pakai
+    // "layar penuh sendiri": pemutar menutupi seluruh layar (Telegram.WebApp.requestFullscreen
+    // bila tersedia) dan diputar 90° otomatis kalau HP sedang tegak.
+    var inTG = !!(TG && TG.initData);
+    var nativeFs = function () { return document.fullscreenElement || document.webkitFullscreenElement; };
+    var fit = function () {
+      if (!pl.classList.contains('pfs')) return;
+      var w = window.innerWidth, h = window.innerHeight;
+      pl.classList.toggle('rot', h > w);
+      pl.style.setProperty('--fw', w + 'px'); pl.style.setProperty('--fh', h + 'px');
+    };
+    var enterPseudo = function () {
+      pl.classList.add('pfs'); document.body.classList.add('pfs-on');
+      try { if (TG && TG.isVersionAtLeast && TG.isVersionAtLeast('8.0')) TG.requestFullscreen(); } catch (x) {}
+      fit(); setTimeout(fit, 300);
+      fsBtn.innerHTML = PI.fsx; show();
+      S.onBack = function () { exitPseudo(); return true; };
+    };
+    var exitPseudo = function () {
+      pl.classList.remove('pfs', 'rot'); document.body.classList.remove('pfs-on');
+      try { if (TG && TG.isFullscreen) TG.exitFullscreen(); } catch (x) {}
+      fsBtn.innerHTML = PI.fs; S.onBack = null; show();
+    };
+    window.addEventListener('resize', fit);
+    try { if (TG && TG.onEvent) TG.onEvent('viewportChanged', fit); } catch (x) {}
     fsBtn.onclick = function (e) {
       e.stopPropagation();
-      if (isFs()) {
-        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-        return;
-      }
+      if (pl.classList.contains('pfs')) return exitPseudo();
+      if (nativeFs()) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      if (inTG) return enterPseudo();
       var req = pl.requestFullscreen || pl.webkitRequestFullscreen;
       if (req) {
         var p = req.call(pl);
         var lock = function () { try { screen.orientation.lock('landscape').catch(function () {}); } catch (x) {} };
-        if (p && p.then) p.then(lock).catch(function () {}); else lock();
+        if (p && p.then) p.then(lock).catch(function () { enterPseudo(); }); else lock();
       } else if (vid.webkitEnterFullscreen) {
-        vid.webkitEnterFullscreen(); // iPhone: hanya layar penuh bawaan
+        vid.webkitEnterFullscreen(); // iPhone di luar Telegram
+      } else {
+        enterPseudo();
       }
     };
     var onFs = function () {
-      fsBtn.innerHTML = isFs() ? PI.fsx : PI.fs;
-      if (!isFs()) { try { screen.orientation.unlock(); } catch (x) {} }
+      if (pl.classList.contains('pfs')) return;
+      fsBtn.innerHTML = nativeFs() ? PI.fsx : PI.fs;
+      if (!nativeFs()) { try { screen.orientation.unlock(); } catch (x) {} }
     };
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
@@ -846,7 +906,10 @@
     if (TG) {
       TG.ready(); TG.expand();
       try { TG.setHeaderColor('#0E0F13'); TG.setBackgroundColor('#0E0F13'); } catch (e) {}
-      TG.BackButton.onClick(function () { history.length > 1 ? history.back() : (location.hash = '#/'); });
+      TG.BackButton.onClick(function () {
+        if (S.onBack && S.onBack()) return; // mis. keluar dari layar penuh dulu
+        history.length > 1 ? history.back() : (location.hash = '#/');
+      });
     }
     if (!TG || !TG.initData) {
       $view.innerHTML = '<div class="empty" style="padding-top:30vh">Buka aplikasi ini dari bot Telegram.</div>';
