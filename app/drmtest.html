@@ -52,6 +52,27 @@
     $verdict.className = 'verdict ' + (ok ? 'ok' : 'bad');
     $verdict.textContent = text;
   }
+  var KIDS = [], WV = [], loggedPssh = false;
+  // Kotak PSSH Widevine (v0): SystemID edef8ba9-79d6-4ace-a3c8-27dcd51d21ed,
+  // isi = WidevineCencHeader { key_id (field 2) ... }
+  function wvPssh(kids) {
+    var data = [];
+    kids.forEach(function (k) {
+      data.push(0x12, 0x10);
+      for (var i = 0; i < 32; i += 2) data.push(parseInt(k.substr(i, 2), 16));
+    });
+    return wvBox(data);
+  }
+  /** Bungkus isi WidevineCencHeader mentah menjadi kotak PSSH lengkap. */
+  function wvBox(data) {
+    data = Array.prototype.slice.call(data);
+    var sys = 'edef8ba979d64acea3c827dcd51d21ed', size = 32 + data.length, out = [];
+    var u32 = function (n) { out.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255); };
+    u32(size); out.push(0x70, 0x73, 0x73, 0x68); u32(0);
+    for (var j = 0; j < 32; j += 2) out.push(parseInt(sys.substr(j, 2), 16));
+    u32(data.length);
+    return new Uint8Array(out.concat(data));
+  }
   function b64(s) { var bin = atob(s), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 
   function env() {
@@ -116,7 +137,7 @@
   }
 
   function run() {
-    done = false; $log.textContent = ''; t0 = Date.now();
+    done = false; $log.textContent = ''; t0 = Date.now(); KIDS = []; WV = []; loggedPssh = false;
     $verdict.className = 'verdict'; $verdict.textContent = 'Sedang mengetes…';
     env();
     checkKS().then(function (ks) {
@@ -133,14 +154,30 @@
       shaka.polyfill.installAll();
       if (!shaka.Player.isBrowserSupported()) throw new Error('Shaka: browser tidak didukung');
       log('Shaka Player ' + shaka.Player.version + ' siap.');
-      // Beberapa cara dicoba berurutan sampai ada yang berhasil
+      // Beberapa cara dicoba berurutan sampai ada yang berhasil.
+      // Manifest Prime membawa data Widevine "telanjang" (tanpa kotak PSSH) -> ditolak HP
+      // ("Initialization data for CENC is incorrect"). Data itu dibungkus ulang di sini.
       var tries = [
-        { name: 'tanpa sertifikat, L3', cert: false, rob: 'SW_SECURE_CRYPTO', url: info.stream },
-        { name: 'tanpa sertifikat, keamanan bawaan', cert: false, rob: '', url: info.stream },
-        { name: 'dengan sertifikat', cert: true, rob: '', url: info.stream },
-        { name: 'proxy Indocast', cert: false, rob: '', url: info.stream_proxy }
-      ].filter(function (t) { return t.url && (!t.cert || info.cert); });
-      var attempt = function (i) {
+        { name: 'PSSH manifest dibungkus, L3', pssh: 'mpd', rob: 'SW_SECURE_CRYPTO', url: info.stream },
+        { name: 'PSSH dari KID, L3', pssh: 'kid', rob: 'SW_SECURE_CRYPTO', url: info.stream },
+        { name: 'PSSH manifest dibungkus, keamanan bawaan', pssh: 'mpd', rob: '', url: info.stream },
+        { name: 'PSSH manifest dibungkus, proxy Indocast', pssh: 'mpd', rob: '', url: info.stream_proxy }
+      ].filter(function (t) { return t.url; });
+      return fetch(info.stream).then(function (r) { return r.text(); }).then(function (mpd) {
+        var m, re = /default_KID\s*=\s*"([0-9a-fA-F-]{32,36})"/g;
+        while ((m = re.exec(mpd))) { var k = m[1].replace(/-/g, '').toLowerCase(); if (KIDS.indexOf(k) < 0) KIDS.push(k); }
+        log('ID kunci (KID) di manifest: ' + (KIDS.join(', ') || 'TIDAK ADA'), KIDS.length ? 'g' : 'r');
+        var rw = /EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED"[^>]*>\s*<cenc:pssh>\s*([A-Za-z0-9+\/=]+)/gi, seen = {};
+        while ((m = rw.exec(mpd))) {
+          if (seen[m[1]]) continue; seen[m[1]] = 1;
+          var u = b64(m[1]), hex = Array.prototype.map.call(u, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+          var isBox = u.length > 8 && u[4] === 0x70 && u[5] === 0x73 && u[6] === 0x73 && u[7] === 0x68;
+          WV.push({ data: u, box: isBox, kid: KIDS.filter(function (k) { return hex.indexOf(k) >= 0; })[0] || '' });
+        }
+        log('Data Widevine di manifest: ' + WV.length + ' (' + (WV[0] ? (WV[0].box ? 'sudah kotak PSSH' : 'mentah, perlu dibungkus') : '-') + ')', WV.length ? 'g' : 'y');
+      }, function () { log('Manifest tidak bisa dibaca langsung (KID diambil dari Shaka).', 'y'); }).then(function () { return attempt(0); });
+      function attempt(i) {
+        loggedPssh = false;
         var t = tries[i];
         return (player ? player.destroy() : Promise.resolve()).then(function () {
           player = new shaka.Player();
@@ -148,8 +185,21 @@
         }).then(function () {
           var adv = {};
           if (t.rob) { adv.videoRobustness = t.rob; adv.audioRobustness = t.rob; }
-          if (t.cert) adv.serverCertificate = b64(info.cert);
-          player.configure({ drm: { servers: { 'com.widevine.alpha': info.license }, advanced: { 'com.widevine.alpha': adv } }, streaming: { bufferingGoal: 20 } });
+          var drm = { servers: { 'com.widevine.alpha': info.license }, advanced: { 'com.widevine.alpha': adv } };
+          drm.initDataTransform = function (initData, type, drmInfo) {
+            var ks = [];
+            try { if (drmInfo && drmInfo.keyIds) drmInfo.keyIds.forEach(function (k) { ks.push(String(k).toLowerCase()); }); } catch (x) {}
+            if (t.pssh === 'mpd' && WV.length) {
+              var e = WV.filter(function (w) { return w.kid && ks.indexOf(w.kid) >= 0; })[0] || WV[0];
+              if (!loggedPssh) { loggedPssh = true; log('Memakai data Widevine manifest' + (e.box ? '' : ' (dibungkus kotak PSSH)') + ', KID ' + (e.kid || '?') + '.'); }
+              return e.box ? e.data : wvBox(e.data);
+            }
+            KIDS.forEach(function (k) { if (ks.indexOf(k) < 0) ks.push(k); });
+            if (!ks.length) return initData;
+            if (!loggedPssh) { loggedPssh = true; log('Memakai PSSH buatan dari ' + ks.length + ' KID.'); }
+            return wvPssh(ks);
+          };
+          player.configure({ drm: drm, streaming: { bufferingGoal: 20 } });
           var ne = player.getNetworkingEngine();
           ne.registerRequestFilter(function (type, req) {
             if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) log('Minta lisensi (' + (req.body ? req.body.byteLength : 0) + ' byte)…');
@@ -168,8 +218,7 @@
           if (i + 1 < tries.length) return attempt(i + 1);
           throw e;
         });
-      };
-      return attempt(0);
+      }
     }).catch(function (e) {
       log('GAGAL: ' + errText(e), 'r');
       verdict(false, '❌ Video tidak bisa diputar — kirim screenshot log ini');
