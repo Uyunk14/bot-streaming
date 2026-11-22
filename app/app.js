@@ -365,7 +365,7 @@
       var prev = d.type === 2 && idx > 0 ? eps[idx - 1] : null;
       var next = d.type === 2 && idx >= 0 && idx < eps.length - 1 ? eps[idx + 1] : null;
 
-      $view.innerHTML = '<div class="player" id="pl"><video id="vid" controls playsinline webkit-playsinline preload="metadata" poster="' + esc(d.cover) + '"></video></div>' +
+      $view.innerHTML = playerHTML(d.cover) +
         '<div style="padding:16px;display:flex;flex-direction:column;gap:16px">' +
         '<div><div class="h2" style="font-size:18px;font-weight:800">' + esc(d.title) + '</div><div class="muted" style="margin-top:4px;font-size:13px">' +
         (d.type === 1 ? 'Film' : 'Season ' + se + ' · Episode ' + ep) + '</div></div>' +
@@ -474,7 +474,144 @@
       });
     };
     drawOpts();
+    bindControls(vid, pl, preview);
     load(false);
+  }
+
+  /* ---------------- pemutar kustom (tanpa tombol download) ---------------- */
+  var PI = {
+    play: '<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><path d="M8 5l12 7-12 7z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+    back10: '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+    fwd10: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
+    fs: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+    fsx: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>'
+  };
+  function playerHTML(poster) {
+    return '<div class="player" id="pl">' +
+      '<video id="vid" playsinline webkit-playsinline preload="metadata" disablepictureinpicture disableremoteplayback ' +
+      'controlslist="nodownload noplaybackrate noremoteplayback" poster="' + esc(poster) + '"></video>' +
+      '<div class="pc" id="pc">' +
+        '<div class="pc-spin" id="pcSpin"><div class="spinner"></div></div>' +
+        '<div class="pc-mid">' +
+          '<button class="pc-skip" data-skip="-10" aria-label="Mundur 10 detik">' + PI.back10 + '<b>10</b></button>' +
+          '<button class="pc-play" id="pcPlay" aria-label="Putar">' + PI.play + '</button>' +
+          '<button class="pc-skip" data-skip="10" aria-label="Maju 10 detik">' + PI.fwd10 + '<b>10</b></button>' +
+        '</div>' +
+        '<div class="pc-bot">' +
+          '<span class="pc-time" id="pcTime">0:00</span>' +
+          '<div class="pc-bar" id="pcBar"><div class="pc-track"><i class="pc-buf" id="pcBuf"></i><i class="pc-fill" id="pcFill"></i><i class="pc-lim" id="pcLim" hidden></i></div><span class="pc-knob" id="pcKnob"></span></div>' +
+          '<span class="pc-time" id="pcDur">0:00</span>' +
+          '<button class="pc-fs" id="pcFs" aria-label="Layar penuh">' + PI.fs + '</button>' +
+        '</div>' +
+      '</div></div>';
+  }
+  function fmtTime(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return (h ? h + ':' + ('0' + m).slice(-2) : m) + ':' + ('0' + x).slice(-2);
+  }
+  function bindControls(vid, pl, preview) {
+    var $ = function (id) { return document.getElementById(id); };
+    var play = $('pcPlay'), bar = $('pcBar'), fill = $('pcFill'), buf = $('pcBuf'), knob = $('pcKnob'), lim = $('pcLim');
+    var tCur = $('pcTime'), tDur = $('pcDur'), fsBtn = $('pcFs'), spin = $('pcSpin');
+    var hideT, dragging = false;
+
+    pl.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    vid.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+    var show = function () {
+      pl.classList.add('show');
+      clearTimeout(hideT);
+      if (!vid.paused) hideT = setTimeout(function () { if (!dragging) pl.classList.remove('show'); }, 3000);
+    };
+    var toggle = function () { if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); } else vid.pause(); };
+    var dur = function () { return vid.duration && isFinite(vid.duration) ? vid.duration : 0; };
+    var maxTime = function () { return preview ? Math.min(preview, dur() || preview) : dur(); };
+    var paint = function (t) {
+      var d = dur(); if (!d) return;
+      var pct = Math.min(100, t / d * 100);
+      fill.style.width = pct + '%'; knob.style.left = pct + '%';
+      tCur.textContent = fmtTime(t);
+    };
+
+    play.onclick = function (e) { e.stopPropagation(); toggle(); show(); };
+    Array.prototype.forEach.call(pl.querySelectorAll('[data-skip]'), function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var t = Math.max(0, Math.min(maxTime() || 1e9, vid.currentTime + (+b.getAttribute('data-skip'))));
+        vid.currentTime = t; paint(t); show(); haptic();
+      };
+    });
+    // Ketuk area video: tampilkan/sembunyikan kontrol; ketuk dua kali kiri/kanan = mundur/maju 10 dtk
+    var lastTap = 0;
+    $('pc').addEventListener('click', function (e) {
+      if (e.target.closest('button') || e.target.closest('.pc-bar')) return;
+      var now = Date.now(), r = pl.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+      if (now - lastTap < 300 && (x < 0.35 || x > 0.65)) {
+        var t = Math.max(0, Math.min(maxTime() || 1e9, vid.currentTime + (x < 0.5 ? -10 : 10)));
+        vid.currentTime = t; paint(t); show(); lastTap = 0; return;
+      }
+      lastTap = now;
+      if (pl.classList.contains('show') && !vid.paused) { pl.classList.remove('show'); clearTimeout(hideT); } else show();
+    });
+
+    // Seek bar (sentuh & geser)
+    var ratioAt = function (clientX) { var r = bar.getBoundingClientRect(); return Math.max(0, Math.min(1, (clientX - r.left) / r.width)); };
+    var seekTo = function (clientX, commit) {
+      var d = dur(); if (!d) return;
+      var t = ratioAt(clientX) * d;
+      if (preview && t > preview) t = Math.max(0, preview - 1);
+      paint(t);
+      if (commit) vid.currentTime = t;
+    };
+    bar.addEventListener('pointerdown', function (e) {
+      dragging = true; try { bar.setPointerCapture(e.pointerId); } catch (x) {} pl.classList.add('drag'); seekTo(e.clientX, false); show();
+    });
+    bar.addEventListener('pointermove', function (e) { if (dragging) seekTo(e.clientX, false); });
+    var end = function (e) { if (!dragging) return; dragging = false; pl.classList.remove('drag'); seekTo(e.clientX, true); show(); };
+    bar.addEventListener('pointerup', end);
+    bar.addEventListener('pointercancel', end);
+
+    vid.addEventListener('loadedmetadata', function () {
+      tDur.textContent = fmtTime(dur());
+      if (preview && dur() > preview) { lim.hidden = false; lim.style.left = (preview / dur() * 100) + '%'; }
+    });
+    vid.addEventListener('timeupdate', function () { if (!dragging) paint(vid.currentTime); });
+    vid.addEventListener('progress', function () {
+      var d = dur(); if (!d || !vid.buffered.length) return;
+      buf.style.width = Math.min(100, vid.buffered.end(vid.buffered.length - 1) / d * 100) + '%';
+    });
+    vid.addEventListener('play', function () { play.innerHTML = PI.pause; play.setAttribute('aria-label', 'Jeda'); show(); });
+    vid.addEventListener('pause', function () { play.innerHTML = PI.play; play.setAttribute('aria-label', 'Putar'); pl.classList.add('show'); clearTimeout(hideT); });
+    vid.addEventListener('waiting', function () { spin.classList.add('on'); });
+    ['playing', 'canplay', 'pause', 'error'].forEach(function (ev) { vid.addEventListener(ev, function () { spin.classList.remove('on'); }); });
+
+    // Layar penuh: seluruh kotak pemutar (supaya kontrol kustom ikut), putar ke landscape bila bisa
+    var isFs = function () { return document.fullscreenElement || document.webkitFullscreenElement; };
+    fsBtn.onclick = function (e) {
+      e.stopPropagation();
+      if (isFs()) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        return;
+      }
+      var req = pl.requestFullscreen || pl.webkitRequestFullscreen;
+      if (req) {
+        var p = req.call(pl);
+        var lock = function () { try { screen.orientation.lock('landscape').catch(function () {}); } catch (x) {} };
+        if (p && p.then) p.then(lock).catch(function () {}); else lock();
+      } else if (vid.webkitEnterFullscreen) {
+        vid.webkitEnterFullscreen(); // iPhone: hanya layar penuh bawaan
+      }
+    };
+    var onFs = function () {
+      fsBtn.innerHTML = isFs() ? PI.fsx : PI.fs;
+      if (!isFs()) { try { screen.orientation.unlock(); } catch (x) {} }
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
+
+    pl.classList.add('show');
   }
 
   /* ---------------- VIP ---------------- */
