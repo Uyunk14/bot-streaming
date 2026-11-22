@@ -91,6 +91,16 @@
     document.documentElement.style.setProperty('--accent', c);
     document.title = app.name || 'Nonton';
   }
+  // Geser-ke-bawah untuk menutup/menciutkan Mini App (Telegram 7.7+). Gestur ini membuat Telegram
+  // "merebut" sentuhan yang ditahan lama (terutama di layar penuh), sehingga tekan-lama 2x batal.
+  // Dimatikan selama di halaman pemutar, dinyalakan lagi saat pindah halaman.
+  function swipes(on) {
+    try {
+      if (!TG || !TG.isVersionAtLeast || !TG.isVersionAtLeast('7.7')) return;
+      if (on && !TG.isVerticalSwipesEnabled) TG.enableVerticalSwipes();
+      if (!on && TG.isVerticalSwipesEnabled) TG.disableVerticalSwipes();
+    } catch (e) {}
+  }
   function setBack(show) {
     if (!TG) return;
     if (show) TG.BackButton.show(); else TG.BackButton.hide();
@@ -119,6 +129,7 @@
       try { if (TG && TG.isFullscreen) TG.exitFullscreen(); } catch (x) {}
     }
     S.onBack = null;
+    swipes(true);
     if (!S.boot) return;
     var r = parseHash();
     var p = r.parts;
@@ -723,7 +734,9 @@
       pl.classList.toggle('rot', h > w);
       pl.style.setProperty('--fw', w + 'px'); pl.style.setProperty('--fh', h + 'px');
     };
+    swipes(false);
     var enterPseudo = function () {
+      swipes(false);
       pl.classList.add('pfs'); document.body.classList.add('pfs-on');
       try { if (TG && TG.isVersionAtLeast && TG.isVersionAtLeast('8.0')) TG.requestFullscreen(); } catch (x) {}
       fit(); setTimeout(fit, 300);
