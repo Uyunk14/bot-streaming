@@ -1,6 +1,6 @@
 # Bot Streaming + Mini App Telegram
 
-Bot Telegram untuk menonton film/drama/anime lewat Mini App. Sumber film dari API Indocast (provider: Filmbox, iQIYI).
+Bot Telegram untuk menonton film/drama/anime lewat Mini App. Sumber film dari API Indocast (provider: Filmbox, iQIYI, Prime Video).
 PHP murni + MySQL, jalan di cPanel (PHP 7.4 – 8.4). Semua pengaturan (token bot, API key, warna, paket VIP, QRIS)
 diatur dari **web admin**, bukan di file.
 
@@ -44,6 +44,9 @@ diatur dari **web admin**, bukan di file.
 3. Centang provider di Admin → Pengaturan.
 4. Video HLS (m3u8): kembalikan sumber `hls => true` dan sediakan method `playlist()` (lihat `iqiyi.php`);
    playlist disajikan `api/?a=m3u8` (tautan bertanda tangan) dan diputar dengan hls.js (dimuat saat perlu).
+5. Video ber-DRM (Prime Video): provider `$external = true` + method `stream()`. Tombol putar di Mini App membuka
+   `app/pv.html` di Chrome (WebView Telegram tidak mengizinkan DRM); lisensi Widevine lewat `api/?a=pv_license`.
+   iPhone/iPad tidak bisa (hanya FairPlay). Uji perangkat: perintah bot `/drmtest` (admin).
 
 ## Pengembangan
 - Setiap mengubah app.js/app.css, naikkan angka `?v=` di app/index.html (file JS/CSS disimpan lama di HP).

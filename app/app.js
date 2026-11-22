@@ -68,6 +68,9 @@
   function watchHref(p, id, path, se, ep) { return '#/w/' + enc(p) + '/' + enc(id) + '/' + enc(path) + '/' + se + '/' + ep; }
   // Gambar dari CDN aoneroom bisa diperkecil + WebP (±185 KB -> ±8 KB per poster)
   function thumb(src, w) {
+    // Gambar Amazon (Prime Video): sisipkan ._SX<lebar>_ (±1-2 MB -> ±20 KB)
+    var am = src && src.indexOf('._') < 0 && /^(https:\/\/[a-z0-9.-]+amazon\.com\/images\/S\/[^?]+)\.(jpe?g|png)$/i.exec(src);
+    if (am) return am[1] + '._SX' + (w ? Math.max(w, 300) : 360) + '_.' + am[2];
     if (!src || !/^https:\/\/[a-z0-9.-]*aoneroom\.com\//i.test(src) || src.indexOf('?') >= 0) return src;
     return src + '?x-oss-process=image/resize,w_' + (w || 240) + '/quality,q_80/format,webp';
   }
@@ -77,7 +80,7 @@
 
   function posterHTML(p, it) {
     var tag = it.type === 2 ? 'Series' : '';
-    return '<a class="poster" href="' + detailHref(p, it) + '"><div class="img">' + img(it.cover, it.title) +
+    return '<a class="poster' + (it.wide ? ' wide' : '') + '" href="' + detailHref(p, it) + '"><div class="img">' + img(it.cover, it.title, it.wide ? 400 : 0) +
       (it.rating ? '<span class="rate">★ ' + esc(it.rating) + '</span>' : '') +
       (it.badge ? '<span class="tag">' + esc(it.badge) + '</span>' : (tag ? '<span class="tag" style="background:rgba(0,0,0,.65)">' + tag + '</span>' : '')) +
       '</div><span class="name">' + esc(it.title) + '</span></a>';
@@ -326,6 +329,19 @@
       return j;
     });
   }
+  // Provider ber-DRM (Prime Video) diputar di Chrome; iPhone/iPad tidak didukung (hanya FairPlay).
+  function isIOS() {
+    var ua = navigator.userAgent || '';
+    return (TG && TG.platform === 'ios') || /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  }
+  function extNote() {
+    if (isIOS()) return '<div class="card extnote warn">⚠️ <b>Tidak bisa diputar di iPhone/iPad.</b> Video Prime Video dikunci pengaman Amazon yang hanya jalan di <b>HP Android</b> (lewat Chrome). Gunakan HP Android untuk menonton judul ini.</div>';
+    return '<div class="card extnote">▶️ Judul Prime Video diputar di <b>aplikasi Chrome</b>, bukan di dalam Telegram. Tidak bisa diputar di iPhone/iPad.</div>';
+  }
+  function openExternal(url) {
+    try { if (TG && TG.openLink) return TG.openLink(url, { try_instant_view: false }); } catch (e) {}
+    window.open(url, '_blank');
+  }
   function canWatch(d, se, ep) {
     if (S.boot.user.vip) return true;
     if (d.type === 1) return S.boot.app.free_minutes > 0;
@@ -356,6 +372,7 @@
         (genres ? '<div class="genres">' + genres + '</div>' : '') +
         '<div class="actions"><a class="btn btn-accent" href="' + playHref + '">' + (playHref === '#/vip' ? ICON.lock : ICON.play) + esc(playLabel) + '</a>' +
         '<button class="favbtn' + (d.is_fav ? ' on' : '') + '" id="fav" aria-label="Favorit">' + ICON.heart + '</button></div>' +
+        (d.external ? extNote() : '') +
         (d.description ? '<p class="desc clamp" id="desc">' + esc(d.description) + '</p><button class="more" id="moreDesc">Selengkapnya</button>' : '') + '</div>';
 
       if (d.type === 2) {
@@ -436,9 +453,24 @@
           var rt = document.getElementById('retry'); if (rt) rt.onclick = function () { renderWatch(p, id, path, se, ep); };
           return;
         }
+        if (j.data.external) return externalPlay(j.data, pl, opts);
         setupPlayer(p, d, j.data, vid, pl, opts, next);
       });
     });
+  }
+
+  // Prime Video: tombol buka pemutar di Chrome (tautan berlaku 3 jam, dibuat ulang tiap halaman ini dibuka)
+  function externalPlay(data, pl, opts) {
+    var ios = isIOS();
+    var o = document.createElement('div'); o.className = 'over';
+    o.innerHTML = ios
+      ? '<div style="font-weight:800;font-size:16px">⚠️ Tidak bisa di iPhone/iPad</div><div class="muted" style="font-size:13px;max-width:300px">Video Prime Video dikunci pengaman Amazon yang hanya jalan di HP Android. Silakan tonton dari HP Android.</div>' +
+        '<button class="btn btn-ghost" id="extGo">Tetap coba buka</button>'
+      : '<div style="font-weight:800;font-size:16px">Diputar di Chrome</div><div class="muted" style="font-size:13px;max-width:300px">Video Prime Video dilindungi pengaman Amazon, jadi diputar di aplikasi Chrome. Selesai menonton, kembali ke Telegram.</div>' +
+        '<button class="btn btn-accent" id="extGo">' + ICON.play + 'Tonton di Chrome</button>';
+    pl.appendChild(o);
+    opts.innerHTML = data.preview ? '<div class="card" style="font-size:13px;line-height:1.5">Mode gratis: bisa ditonton <b>' + Math.round(data.preview / 60) + ' menit</b> pertama. <a href="#/vip" style="color:var(--accent);font-weight:700">Jadi VIP</a> untuk menonton penuh.</div>' : '';
+    document.getElementById('extGo').onclick = function () { haptic(); openExternal(data.external); };
   }
 
   function setupPlayer(p, d, data, vid, pl, opts, next) {
@@ -1004,6 +1036,11 @@
       if (needRedraw) { S.homeCache = {}; route(); }
     });
     window.addEventListener('hashchange', route);
+  }
+  // app/pv.html (pemutar di Chrome) memakai ulang pemutar kustom tanpa menjalankan Mini App
+  if (window.NY_PLAYER_ONLY) {
+    window.NYPlayer = { html: playerHTML, bind: bindControls, toast: toast, applyTheme: applyTheme, thumb: thumb, icon: ICON, isIOS: isIOS };
+    return;
   }
   start();
 })();

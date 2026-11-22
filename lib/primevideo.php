@@ -9,10 +9,15 @@
  */
 require_once __DIR__ . '/core.php';
 
-function pv_call($method, $path, array $params = [])
+function pv_call($method, $path, array $params = [], $ttl = 0, $force = false)
 {
     $key = setting('indocast_key');
     if ($key === '') return ['ok' => false, 'data' => null, 'error' => 'API key Indocast belum diisi.'];
+    $ckey = 'pv:' . $method . ':' . $path . ':' . json_encode($params);
+    if ($ttl > 0 && !$force) {
+        $hit = cache_get($ckey);
+        if ($hit !== null) { stat_inc('cache_hits'); return ['ok' => true, 'data' => $hit, 'error' => '']; }
+    }
     $url = rtrim(setting('indocast_base', 'https://indocast.site/api'), '/') . '/primevideo/' . ltrim($path, '/');
     $h = ['x-api-key: ' . $key, 'Accept: application/json'];
     if ($method === 'GET') {
@@ -28,6 +33,7 @@ function pv_call($method, $path, array $params = [])
         app_log('primevideo', $method . ' ' . $path . ' ' . json_encode($params) . ' -> ' . $msg);
         return ['ok' => false, 'data' => null, 'error' => (string) $msg];
     }
+    if ($ttl > 0) cache_set($ckey, $j, $ttl);
     return ['ok' => true, 'data' => $j, 'error' => ''];
 }
 

@@ -59,6 +59,60 @@ try {
         exit;
     }
 
+    /* ---------- Pemutar luar (app/pv.html, Prime Video): tautan bertanda tangan dari aksi play ---------- */
+    if ($action === 'pv_play' || $action === 'pv_progress') {
+        $g = array_intersect_key($_GET, array_flip(['t', 'p', 'id', 'path', 'se', 'ep', 'u', 'pv', 'x', 's']));
+        if (!verify_params($g) || $g['t'] !== 'pw') fail('Tautan tonton sudah kedaluwarsa. Buka lagi dari bot Telegram.', 403);
+        $prov = provider_get($g['p']);
+        if (!$prov || empty($prov->external) || !isset(providers_enabled()[$g['p']])) fail('Sumber film tidak aktif.', 404);
+        $u = q_row("SELECT * FROM users WHERE id = ?", [(int) $g['u']]);
+        if (!$u || !empty($u['banned'])) fail('Akun tidak ditemukan.', 403);
+        $se = (int) $g['se'];
+        $ep = (int) $g['ep'];
+        $det = $prov->detail($g['id'], $g['path']);
+        if (!$det['ok']) fail($det['error'], 502);
+        $d = $det['data'];
+
+        if ($action === 'pv_progress') {
+            q(
+                "INSERT INTO history (user_id, provider, subject_id, detail_path, title, cover, stype, se, ep, position, duration, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                 ON DUPLICATE KEY UPDATE detail_path = VALUES(detail_path), title = VALUES(title), cover = VALUES(cover), stype = VALUES(stype),
+                   se = VALUES(se), ep = VALUES(ep), position = VALUES(position), duration = VALUES(duration), updated_at = NOW()",
+                [$u['id'], $prov->id, mb_substr($d['id'], 0, 40), $d['path'], mb_substr($d['title'], 0, 255), mb_substr($d['cover'], 0, 500),
+                 $d['type'], $se, $ep, max(0, (int) inp('pos')), max(0, (int) inp('dur'))]
+            );
+            ok();
+        }
+
+        $r = $prov->stream($g['id'], $g['path'], $se, $ep);
+        if (!$r['ok']) fail($r['error'], 502);
+        // Episode berikutnya (hanya bila boleh ditonton: VIP atau termasuk gratis)
+        $next = null;
+        if ($d['type'] === 2) {
+            $list = $prov->episodeList($d);
+            foreach ($list as $i => $e) {
+                if ($e['se'] !== $se || $e['ep'] !== $ep || !isset($list[$i + 1])) continue;
+                $n = $list[$i + 1];
+                $okNext = user_is_vip($u) || in_array($n['se'] . ':' . $n['ep'], free_episode_keys($prov, $d), true);
+                $next = ['label' => 'Eps ' . $n['ep'], 'url' => $okNext ? pw_link($prov->id, $d['id'], $d['path'], $n['se'], $n['ep'], (int) $u['id'], 0) : ''];
+            }
+        }
+        $h = q_row("SELECT se, ep, position, duration FROM history WHERE user_id = ? AND provider = ? AND subject_id = ?", [$u['id'], $prov->id, $d['id']]);
+        $resume = ($h && (int) $h['se'] === $se && (int) $h['ep'] === $ep && $h['position'] > 10 && (!$h['duration'] || $h['position'] < $h['duration'] - 30)) ? (int) $h['position'] : 0;
+        ok(['data' => array_merge($r['data'], [
+            'title' => $d['title'],
+            'label' => $d['type'] === 1 ? 'Film' : 'Season ' . $se . ' · Episode ' . $ep,
+            'cover' => $d['cover'],
+            'preview' => (int) $g['pv'],
+            'resume' => ((int) $g['pv'] && $resume >= (int) $g['pv']) ? 0 : $resume,
+            'next' => $next,
+            'bot' => setting('bot_username'),
+            'color' => setting('primary_color', '#6A4DF4'),
+            'app' => setting('bot_name'),
+        ])]);
+    }
+
     /* ---------- UJI DRM Prime Video (tautan bertanda tangan dari /drmtest admin) ---------- */
     if ($action === 'pv_info' || $action === 'pv_license') {
         require_once dirname(__DIR__) . '/lib/primevideo.php';
@@ -118,7 +172,7 @@ try {
     switch ($action) {
         case 'boot':
             $provs = [];
-            foreach (providers_enabled() as $id => $info) $provs[] = ['id' => $id, 'name' => $info['name']];
+            foreach (providers_enabled() as $id => $info) $provs[] = ['id' => $id, 'name' => $info['name'], 'ext' => !empty($info['external'])];
             ok([
                 'app' => [
                     'name' => setting('bot_name'),
@@ -182,6 +236,15 @@ try {
                 } elseif (!in_array($se . ':' . $ep, free_episode_keys($prov, $d), true)) {
                     fail('Episode ini khusus VIP.', 402, ['need_vip' => true]);
                 }
+            }
+            if (!empty($prov->external)) {
+                // Video ber-DRM (Prime Video): diputar di Chrome lewat app/pv.html, tautan bertanda tangan 3 jam
+                stat_inc('plays');
+                q("INSERT INTO views (d, provider, subject_id, title, n) VALUES (CURDATE(), ?, ?, ?, 1) ON DUPLICATE KEY UPDATE n = n + 1, title = VALUES(title)", [$prov->id, $d['id'], mb_substr($d['title'], 0, 255)]);
+                ok(['data' => [
+                    'external' => pw_link($prov->id, $id, $d['path'], $se, $ep, (int) $user['id'], $preview),
+                    'sources' => [], 'subtitles' => [], 'preview' => $preview, 'se' => $se, 'ep' => $ep,
+                ]]);
             }
             $r = $prov->play($id, $path, $se, $ep, 'in_id');
             if (!$r['ok']) fail($r['error'], empty($r['unavailable']) ? 502 : 404);
@@ -293,6 +356,14 @@ function user_public(array $u)
         'vip_until' => $u['vip_until'] ? strtotime($u['vip_until']) : 0,
         'notify' => (bool) $u['notify'],
     ];
+}
+
+/** Tautan pemutar luar (app/pv.html) bertanda tangan, berlaku 3 jam. $pv = batas detik gratis (0 = penuh). */
+function pw_link($pid, $id, $path, $se, $ep, $uid, $pv)
+{
+    return base_url('app/pv.html?' . http_build_query(sign_params([
+        't' => 'pw', 'p' => $pid, 'id' => (string) $id, 'path' => (string) $path, 'se' => (int) $se, 'ep' => (int) $ep, 'u' => (int) $uid, 'pv' => (int) $pv,
+    ], 10800)));
 }
 
 /** Kunci "se:ep" episode gratis = N episode pertama dari season pertama. */

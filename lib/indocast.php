@@ -76,6 +76,7 @@ function provider_registry()
     return [
         'filmbox' => ['name' => 'Filmbox', 'note' => 'Film, series, anime'],
         'iqiyi' => ['name' => 'iQIYI', 'note' => 'Drama China/Korea, anime, variety (HLS)'],
+        'primevideo' => ['name' => 'Prime Video', 'note' => 'Film & serial Amazon (DRM: diputar di Chrome Android, tidak bisa di iPhone)', 'external' => true],
     ];
 }
 

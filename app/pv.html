@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E0F13">
+<meta name="robots" content="noindex">
+<title>Nonton</title>
+<link rel="stylesheet" href="app.css?v=8">
+<style>
+  .pvwrap { max-width: 860px; margin: 0 auto; }
+  .pvtop { display:flex; align-items:center; gap:10px; padding:12px 16px; }
+  .pvtop b { flex:1; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pvtop a { font-size:13px; font-weight:600; color:var(--accent); white-space:nowrap; }
+  .pvbody { padding:16px; display:flex; flex-direction:column; gap:16px; }
+  .pvmsg { padding:28px 20px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .pvmsg .big { font-size:40px; }
+  .pvmsg p { margin:0; color:var(--muted); font-size:13px; line-height:1.6; max-width:340px; }
+</style>
+<script>window.NY_PLAYER_ONLY = 1;</script>
+<script src="app.js?v=8"></script>
+</head>
+<body>
+<div class="pvwrap">
+  <div class="pvtop"><b id="appName">Nonton</b><a id="backTg" href="#" hidden>‹ Kembali ke Telegram</a></div>
+  <div id="stage"><div class="player"><div class="center-load" style="position:absolute;inset:0"><div class="spinner"></div></div></div></div>
+  <div class="pvbody" id="body"></div>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script>
+(function () {
+  'use strict';
+  var NP = window.NYPlayer;
+  var SHAKA = 'https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.12.6/shaka-player.compiled.js';
+  var QS = location.search.slice(1);
+  var ua = navigator.userAgent || '';
+  var isAndroid = /Android/i.test(ua);
+  var inWebView = /; wv\)|Telegram/i.test(ua);
+  var $stage = document.getElementById('stage'), $body = document.getElementById('body');
+  var info = null, player = null, vid = null, pl = null;
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function chromeIntent() {
+    return 'intent://' + location.host + location.pathname + location.search +
+      '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end';
+  }
+  function message(icon, title, text, btns) {
+    $stage.innerHTML = '';
+    $body.innerHTML = '<div class="pvmsg"><div class="big">' + icon + '</div><div style="font-weight:800;font-size:17px">' + title + '</div><p>' + text + '</p>' + (btns || '') + '</div>';
+  }
+  function b64(s) { var bin = atob(s), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+  // Kotak PSSH Widevine dari isi WidevineCencHeader (manifest Prime mengirim isinya saja)
+  function wvBox(data) {
+    data = Array.prototype.slice.call(data);
+    var sys = 'edef8ba979d64acea3c827dcd51d21ed', out = [];
+    var u32 = function (n) { out.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255); };
+    u32(32 + data.length); out.push(0x70, 0x73, 0x73, 0x68); u32(0);
+    for (var j = 0; j < 32; j += 2) out.push(parseInt(sys.substr(j, 2), 16));
+    u32(data.length);
+    return new Uint8Array(out.concat(data));
+  }
+  function wvFromKids(kids) {
+    var d = [];
+    kids.forEach(function (k) { d.push(0x12, 0x10); for (var i = 0; i < 32; i += 2) d.push(parseInt(k.substr(i, 2), 16)); });
+    return wvBox(d);
+  }
+
+  /* 1) Perangkat */
+  function checkDevice() {
+    if (NP.isIOS()) {
+      message('📵', 'Tidak bisa diputar di iPhone/iPad', 'Video Prime Video dikunci pengaman Amazon (Widevine) yang tidak tersedia di iPhone/iPad. Silakan tonton dari <b>HP Android</b> lewat Chrome.');
+      return Promise.reject('stop');
+    }
+    // WebView (browser bawaan Telegram, dll.) tidak memberi izin DRM -> langsung ke Chrome
+    if (isAndroid && inWebView) return Promise.resolve(false);
+    if (!navigator.requestMediaKeySystemAccess || !window.MediaSource) return Promise.resolve(false);
+    var cfg = [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.4D401E"' }], audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }] }];
+    return navigator.requestMediaKeySystemAccess('com.widevine.alpha', cfg).then(function () { return true; }, function () { return false; });
+  }
+  function needChrome() {
+    if (isAndroid) {
+      message('🌐', 'Buka di Chrome', 'Browser ini tidak bisa memutar video Prime Video. Tekan tombol di bawah untuk membukanya di <b>Chrome</b>.',
+        '<a class="btn btn-accent" href="' + esc(chromeIntent()) + '">Buka di Chrome</a>' +
+        '<button class="btn btn-ghost" id="cp">Salin tautan</button>');
+      var cp = document.getElementById('cp');
+      cp.onclick = function () { (navigator.clipboard ? navigator.clipboard.writeText(location.href) : Promise.reject()).then(function () { NP.toast('Tautan disalin. Tempel di Chrome.'); }, function () { NP.toast('Salin manual dari kolom alamat.'); }); };
+      // Sekali coba otomatis pindah ke Chrome (mis. dibuka dari browser bawaan Telegram)
+      var k = 'pvchrome:' + QS.slice(-12);
+      try { if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, '1'); location.href = chromeIntent(); } } catch (e) {}
+    } else {
+      message('🌐', 'Browser tidak mendukung', 'Video Prime Video butuh pengaman Widevine. Buka tautan ini di <b>Chrome</b> atau <b>Edge</b>, atau tonton dari HP Android.');
+    }
+  }
+
+  /* 2) Data video */
+  function getInfo() {
+    return fetch('../api/?a=pv_play&' + QS).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw new Error(j.error || 'Gagal memuat video.');
+      return j.data;
+    });
+  }
+  function loadShaka() {
+    if (window.shaka) return Promise.resolve();
+    return new Promise(function (ok, no) {
+      var s = document.createElement('script'); s.src = SHAKA; s.onload = ok; s.onerror = function () { no(new Error('Gagal memuat pemutar. Periksa koneksi.')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  /* 3) Putar */
+  function start(url) {
+    var raw = [], kids = [];
+    return fetch(url).then(function (r) { return r.text(); }).then(function (mpd) {
+      var m, re = /default_KID\s*=\s*"([0-9a-fA-F-]{32,36})"/g;
+      while ((m = re.exec(mpd))) { var k = m[1].replace(/-/g, '').toLowerCase(); if (kids.indexOf(k) < 0) kids.push(k); }
+      var rw = /EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED"[^>]*>\s*<cenc:pssh>\s*([A-Za-z0-9+\/=]+)/gi, seen = {};
+      while ((m = rw.exec(mpd))) {
+        if (seen[m[1]]) continue; seen[m[1]] = 1;
+        var u = b64(m[1]), hex = Array.prototype.map.call(u, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        var box = u.length > 8 && u[4] === 0x70 && u[5] === 0x73 && u[6] === 0x73 && u[7] === 0x68;
+        raw.push({ data: box ? u : wvBox(u), kid: kids.filter(function (k) { return hex.indexOf(k) >= 0; })[0] || '' });
+      }
+    }, function () {}).then(function () {
+      return (player ? player.destroy() : Promise.resolve()).then(function () {
+        player = new shaka.Player();
+        return player.attach(vid);
+      });
+    }).then(function () {
+      player.configure({
+        drm: {
+          servers: { 'com.widevine.alpha': info.license },
+          initDataTransform: function (initData, type, drmInfo) {
+            var ks = [];
+            try { if (drmInfo && drmInfo.keyIds) drmInfo.keyIds.forEach(function (k) { ks.push(String(k).toLowerCase()); }); } catch (x) {}
+            if (raw.length) return (raw.filter(function (r) { return r.kid && ks.indexOf(r.kid) >= 0; })[0] || raw[0]).data;
+            kids.forEach(function (k) { if (ks.indexOf(k) < 0) ks.push(k); });
+            return ks.length ? wvFromKids(ks) : initData;
+          }
+        },
+        streaming: { bufferingGoal: 30, rebufferingGoal: 2 },
+        abr: { enabled: true }
+      });
+      player.addEventListener('error', function (ev) { console.warn('shaka', ev.detail); });
+      return player.load(url, info.resume || 0, 'application/dash+xml');
+    });
+  }
+
+  function drawOpts() {
+    var tracks = player.getVariantTracks();
+    var hs = tracks.map(function (t) { return t.height; }).filter(function (h, i, a) { return h && a.indexOf(h) === i; }).sort(function (a, b) { return b - a; }).slice(0, 4);
+    var abr = player.getConfiguration().abr.enabled;
+    var act = tracks.filter(function (t) { return t.active; })[0];
+    var texts = player.getTextTracks();
+    var vis = player.isTextTrackVisible();
+    var actText = texts.filter(function (t) { return t.active; })[0];
+    var html = (info.preview ? '<div class="card" style="font-size:13px;line-height:1.5">Mode gratis: bisa ditonton <b>' + Math.round(info.preview / 60) + ' menit</b> pertama. Jadi VIP di bot Telegram untuk menonton penuh.</div>' : '') +
+      '<div><div class="label">Kualitas</div><div class="pills"><button class="pill' + (abr ? ' on' : '') + '" data-q="auto">Auto' + (abr && act ? ' (' + act.height + 'p)' : '') + '</button>' +
+      hs.map(function (h) { return '<button class="pill' + (!abr && act && act.height === h ? ' on' : '') + '" data-q="' + h + '">' + h + 'p</button>'; }).join('') + '</div></div>';
+    if (texts.length) {
+      html += '<div><div class="label">Subtitle</div><div class="pills">' + texts.map(function (t) {
+        return '<button class="pill' + (vis && actText && actText.id === t.id ? ' on' : '') + '" data-sub="' + t.id + '">' + esc(t.label || t.language) + '</button>';
+      }).join('') + '<button class="pill' + (!vis ? ' on' : '') + '" data-sub="off">Mati</button></div></div>';
+    }
+    if (info.next) {
+      html += info.next.url
+        ? '<a class="btn btn-accent" href="' + esc(info.next.url) + '">' + esc(info.next.label) + ' ›</a>'
+        : '<div class="card" style="font-size:13px">' + esc(info.next.label) + ' khusus VIP — jadi VIP di bot Telegram.</div>';
+    }
+    document.getElementById('opts').innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) {
+      b.onclick = function () {
+        var q = b.getAttribute('data-q');
+        if (q === 'auto') player.configure({ abr: { enabled: true } });
+        else {
+          player.configure({ abr: { enabled: false } });
+          var t = player.getVariantTracks().filter(function (x) { return x.height === +q; }).sort(function (a, b2) { return b2.bandwidth - a.bandwidth; })[0];
+          if (t) player.selectVariantTrack(t, true);
+        }
+        setTimeout(drawOpts, 300);
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-sub]'), function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-sub');
+        if (id === 'off') player.setTextTrackVisibility(false);
+        else {
+          var t = player.getTextTracks().filter(function (x) { return String(x.id) === id; })[0];
+          if (t) { player.selectTextTrack(t); player.setTextTrackVisibility(true); }
+        }
+        setTimeout(drawOpts, 100);
+      };
+    });
+  }
+
+  function addSubs() {
+    var jobs = info.subtitles.map(function (s) {
+      return player.addTextTrackAsync(s.url, s.lang, 'subtitles', 'application/ttml+xml', '', s.label).catch(function () {
+        return s.proxy ? player.addTextTrackAsync(s.proxy, s.lang, 'subtitles', 'application/ttml+xml', '', s.label).catch(function () {}) : null;
+      });
+    });
+    return Promise.all(jobs).then(function () {
+      var t = player.getTextTracks().filter(function (x) { return x.language === 'id'; })[0] || player.getTextTracks()[0];
+      if (t) { player.selectTextTrack(t); player.setTextTrackVisibility(true); }
+    });
+  }
+
+  /* Simpan posisi tontonan (Lanjut Nonton di Mini App) */
+  var lastSave = 0;
+  function save(force) {
+    if (!vid || !vid.duration || !isFinite(vid.duration)) return;
+    var now = Date.now();
+    if (!force && now - lastSave < 15000) return;
+    lastSave = now;
+    try {
+      fetch('../api/?a=pv_progress&' + QS, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pos: Math.floor(vid.currentTime), dur: Math.floor(vid.duration) }) }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function run() {
+    checkDevice().then(function (ok) {
+      if (!ok) { needChrome(); throw 'stop'; }
+      return Promise.all([getInfo(), loadShaka()]);
+    }).then(function (r) {
+      info = r[0];
+      NP.applyTheme({ color: info.color, name: info.title });
+      document.getElementById('appName').textContent = info.app || 'Nonton';
+      if (info.bot) { var bk = document.getElementById('backTg'); bk.href = 'https://t.me/' + info.bot; bk.hidden = false; }
+      $stage.innerHTML = NP.html(info.cover);
+      vid = document.getElementById('vid'); pl = document.getElementById('pl');
+      $body.innerHTML = '<div><div class="h2" style="font-size:18px;font-weight:800">' + esc(info.title) + '</div><div class="muted" style="margin-top:4px;font-size:13px">' + esc(info.label) + '</div></div><div id="opts" style="display:flex;flex-direction:column;gap:16px"></div>';
+      NP.bind(vid, pl, info.preview);
+      shaka.polyfill.installAll();
+      return start(info.stream).catch(function (e) {
+        console.warn('direct failed', e);
+        if (!info.stream_proxy || (e && e.code === 6001)) throw e;
+        return start(info.stream_proxy);
+      });
+    }).then(function () {
+      drawOpts();
+      player.addEventListener('adaptation', drawOpts);
+      player.addEventListener('variantchanged', drawOpts);
+      addSubs().then(drawOpts);
+      var p = vid.play(); if (p && p.catch) p.catch(function () {});
+      vid.addEventListener('timeupdate', function () {
+        save(false);
+        if (info.preview && vid.currentTime >= info.preview) {
+          vid.pause(); vid.currentTime = info.preview;
+          if (!pl.querySelector('.over')) {
+            if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+            var o = document.createElement('div'); o.className = 'over';
+            o.innerHTML = '<div style="font-weight:800;font-size:16px">Waktu gratis habis</div><div class="muted" style="font-size:13px">Lanjutkan film ini dengan VIP di bot Telegram.</div>' +
+              (info.bot ? '<a class="btn btn-accent" href="https://t.me/' + esc(info.bot) + '">' + NP.icon.crown + 'Jadi VIP</a>' : '');
+            pl.appendChild(o);
+          }
+        }
+      });
+      vid.addEventListener('seeking', function () { if (info.preview && vid.currentTime > info.preview) vid.currentTime = Math.max(0, info.preview - 1); });
+      vid.addEventListener('pause', function () { save(true); });
+      document.addEventListener('visibilitychange', function () { if (document.hidden) save(true); });
+      vid.addEventListener('ended', function () {
+        save(true);
+        if (info.next && info.next.url) { NP.toast('Lanjut ke ' + info.next.label + '…'); setTimeout(function () { location.href = info.next.url; }, 1500); }
+      });
+    }).catch(function (e) {
+      if (e === 'stop') return;
+      var msg = e && e.code ? (e.code === 6001 ? 'Perangkat ini tidak mendukung pengaman video (Widevine).' : 'Video gagal diputar (kode ' + e.code + '). Coba lagi sebentar lagi.') : (e && e.message) || 'Video gagal dimuat.';
+      if (pl) {
+        var o = document.createElement('div'); o.className = 'over';
+        o.innerHTML = '<div class="muted" style="font-size:13px">' + esc(msg) + '</div><button class="btn btn-ghost" onclick="location.reload()">Coba lagi</button>';
+        pl.appendChild(o);
+      } else {
+        message('⚠️', 'Tidak bisa memutar', esc(msg), '<button class="btn btn-ghost" onclick="location.reload()">Coba lagi</button>');
+      }
+    });
+  }
+  run();
+})();
+</script>
+</body>
+</html>
