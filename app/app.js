@@ -487,6 +487,12 @@
     fs: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
     fsx: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>'
   };
+  var SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  function savedRate() {
+    var r = 1;
+    try { r = parseFloat(localStorage.getItem('rate')) || 1; } catch (e) {}
+    return SPEEDS.indexOf(r) >= 0 ? r : 1;
+  }
   function playerHTML(poster) {
     return '<div class="player" id="pl">' +
       '<video id="vid" playsinline webkit-playsinline preload="metadata" disablepictureinpicture disableremoteplayback ' +
@@ -502,8 +508,13 @@
           '<span class="pc-time" id="pcTime">0:00</span>' +
           '<div class="pc-bar" id="pcBar"><div class="pc-track"><i class="pc-buf" id="pcBuf"></i><i class="pc-fill" id="pcFill"></i><i class="pc-lim" id="pcLim" hidden></i></div><span class="pc-knob" id="pcKnob"></span></div>' +
           '<span class="pc-time" id="pcDur">0:00</span>' +
+          '<button class="pc-speed" id="pcSpeed" aria-label="Kecepatan pemutaran">1x</button>' +
           '<button class="pc-fs" id="pcFs" aria-label="Layar penuh">' + PI.fs + '</button>' +
         '</div>' +
+      '</div>' +
+      '<div class="pc-fast" id="pcFast" hidden>2x <svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg></div>' +
+      '<div class="pc-menu" id="pcMenu" hidden><div class="pc-menu-h">Kecepatan pemutaran</div>' +
+        SPEEDS.map(function (s) { return '<button data-rate="' + s + '">' + s + 'x</button>'; }).join('') +
       '</div></div>';
   }
   function fmtTime(s) {
@@ -543,9 +554,56 @@
         vid.currentTime = t; paint(t); show(); haptic();
       };
     });
+    // Kecepatan pemutaran (diingat di perangkat ini)
+    var rate = savedRate();
+    var speedBtn = $('pcSpeed'), menu = $('pcMenu'), fast = $('pcFast');
+    var applyRate = function () {
+      vid.defaultPlaybackRate = rate; vid.playbackRate = rate;
+      speedBtn.textContent = rate === 1 ? '1x' : rate + 'x';
+      Array.prototype.forEach.call(menu.querySelectorAll('[data-rate]'), function (b) { b.classList.toggle('on', +b.getAttribute('data-rate') === rate); });
+    };
+    applyRate();
+    vid.addEventListener('loadedmetadata', function () { if (!holding) vid.playbackRate = rate; });
+    speedBtn.onclick = function (e) { e.stopPropagation(); menu.hidden = !menu.hidden; clearTimeout(hideT); pl.classList.add('show'); };
+    Array.prototype.forEach.call(menu.querySelectorAll('[data-rate]'), function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        rate = +b.getAttribute('data-rate');
+        try { localStorage.setItem('rate', String(rate)); } catch (x) {}
+        applyRate(); menu.hidden = true; show(); haptic();
+      };
+    });
+    menu.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    // Tekan lama di video = 2x selama ditahan (seperti YouTube)
+    var holdT, holding = false, suppressClick = false;
+    var startHold = function (e) {
+      if (e.target.closest('button') || e.target.closest('.pc-bar') || e.target.closest('.pc-menu')) return;
+      clearTimeout(holdT);
+      holdT = setTimeout(function () {
+        if (vid.paused) return;
+        holding = true; suppressClick = true;
+        vid.playbackRate = 2; fast.hidden = false;
+        pl.classList.remove('show'); haptic('medium');
+      }, 450);
+    };
+    var endHold = function () {
+      clearTimeout(holdT);
+      if (!holding) return;
+      holding = false; vid.playbackRate = rate; fast.hidden = true;
+    };
+    $('pc').addEventListener('pointerdown', startHold);
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { $('pc').addEventListener(ev, endHold); });
+    $('pc').addEventListener('pointermove', function (e) {
+      // geser jari (scroll) membatalkan tekan lama yang belum aktif
+      if (!holding && (Math.abs(e.movementX) > 6 || Math.abs(e.movementY) > 6)) clearTimeout(holdT);
+    });
+
     // Ketuk area video: tampilkan/sembunyikan kontrol; ketuk dua kali kiri/kanan = mundur/maju 10 dtk
     var lastTap = 0;
     $('pc').addEventListener('click', function (e) {
+      if (suppressClick) { suppressClick = false; return; }
+      if (!menu.hidden) { menu.hidden = true; return; }
       if (e.target.closest('button') || e.target.closest('.pc-bar')) return;
       var now = Date.now(), r = pl.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
       if (now - lastTap < 300 && (x < 0.35 || x > 0.65)) {

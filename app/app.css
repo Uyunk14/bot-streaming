@@ -131,6 +131,14 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .pc-knob{position:absolute;left:0;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 45%,transparent)}
 .player.drag .pc-knob{transform:scale(1.25)}
 .pc-fs{width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:#fff}
+.pc-speed{height:28px;min-width:40px;padding:0 8px;border-radius:8px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:700}
+.pc-menu{position:absolute;right:10px;bottom:50px;z-index:4;width:min(300px,calc(100% - 20px));max-height:calc(100% - 58px);overflow:auto;padding:8px;border-radius:14px;background:rgba(20,22,27,.96);box-shadow:0 10px 30px rgba(0,0,0,.5);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pc-menu-h{grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);padding:0 4px 2px}
+.pc-menu button{height:32px;border-radius:9px;background:var(--surface);color:var(--soft);font-size:12px;font-weight:600}
+.pc-menu button.on{background:var(--accent);color:#fff}
+.player:fullscreen .pc-menu{bottom:64px}
+.pc-fast{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:3;display:flex;align-items:center;gap:4px;padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:13px;font-weight:700;pointer-events:none}
+.pc-fast svg{width:16px;height:16px}
 .pc-spin{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none}
 .pc-spin.on{display:flex}
 .pc-spin.on~.pc-mid .pc-play{opacity:0}
