@@ -1,0 +1,14 @@
+---
+# Deploy dari cPanel → Git Version Control → Deploy HEAD Commit.
+# GANTI DEPLOYPATH ke folder subdomain (document root) bot streaming.
+# Catatan: "cp -R ./*" tidak menyalin file berawalan titik, jadi .htaccess disalin satu per satu.
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/amodeenw/GANTI_FOLDER_SUBDOMAIN
+    - /bin/mkdir -p $DEPLOYPATH/storage
+    - /bin/cp -R ./* $DEPLOYPATH/
+    - /bin/cp ./.htaccess $DEPLOYPATH/.htaccess
+    - /bin/cp ./lib/.htaccess $DEPLOYPATH/lib/.htaccess
+    - /bin/cp ./storage/.htaccess $DEPLOYPATH/storage/.htaccess
+    - /bin/find $DEPLOYPATH -type d ! -perm 755 -exec /bin/chmod 755 {} +
+    - /bin/find $DEPLOYPATH -type f ! -name config.php ! -perm 644 -exec /bin/chmod 644 {} +
