@@ -165,11 +165,44 @@ try {
         exit;
     }
 
-    /* ---------- Autentikasi Mini App ---------- */
+    /* ---------- Versi web (browser biasa): info halaman masuk, tukar kode, keluar ---------- */
+    if ($action === 'web_info') {
+        $provs = [];
+        foreach (providers_enabled() as $info) $provs[] = $info['name'];
+        ok(['app' => ['name' => setting('bot_name'), 'color' => setting('primary_color', '#6A4DF4'), 'logo' => setting('logo_url'),
+            'bot' => setting('bot_username'), 'providers' => $provs]]);
+    }
+    if ($action === 'web_login') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('Metode salah.', 405);
+        require_once dirname(__DIR__) . '/lib/weblogin.php';
+        $r = wl_redeem(preg_replace('/\D/', '', inp('code')), inp('token'));
+        if (!$r['ok']) fail($r['error'], 400);
+        $u = q_row("SELECT * FROM users WHERE id = ?", [$r['user_id']]);
+        if (!$u || !empty($u['banned'])) { wl_logout($r['session']); fail('Akun kamu diblokir admin.', 403); }
+        tg_send($u['id'], "🌐 <b>Login web berhasil</b>\nPerangkat: " . e(wl_device()) . "\nWaktu: " . date('d M Y H:i') .
+            "\n\nBukan kamu? Kirim /logoutweb untuk mengeluarkan semua perangkat web.", tg_reply_keyboard());
+        ok(['session' => $r['session']]);
+    }
+    if ($action === 'web_logout') {
+        require_once dirname(__DIR__) . '/lib/weblogin.php';
+        wl_logout(isset($_SERVER['HTTP_X_WEB_SESSION']) ? $_SERVER['HTTP_X_WEB_SESSION'] : '');
+        ok();
+    }
+
+    /* ---------- Autentikasi: Mini App (initData) atau sesi web ---------- */
     $initData = isset($_SERVER['HTTP_X_INIT_DATA']) ? $_SERVER['HTTP_X_INIT_DATA'] : '';
-    $tgUser = tg_validate_init_data($initData);
-    if (!$tgUser) fail('Buka aplikasi ini dari bot Telegram.', 401);
-    $user = user_upsert($tgUser);
+    $tgUser = $initData !== '' ? tg_validate_init_data($initData) : null;
+    if ($tgUser) {
+        $user = user_upsert($tgUser);
+    } else {
+        $ws = isset($_SERVER['HTTP_X_WEB_SESSION']) ? $_SERVER['HTTP_X_WEB_SESSION'] : '';
+        $user = null;
+        if ($ws !== '') {
+            require_once dirname(__DIR__) . '/lib/weblogin.php';
+            $user = wl_session_user($ws);
+        }
+        if (!$user) fail($ws !== '' ? 'Sesi login berakhir. Silakan masuk lagi.' : 'Buka aplikasi ini dari bot Telegram.', 401, ['login' => true]);
+    }
     if (!empty($user['banned'])) fail('Akun kamu diblokir admin.', 403);
     $isVip = user_is_vip($user);
 

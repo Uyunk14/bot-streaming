@@ -26,6 +26,13 @@ diatur dari **web admin**, bukan di file.
 - VIP = beli paket (durasi hari) lewat QRIS GoBiz. Nominal = harga + kode unik 1–299.
 - Wajib gabung channel & grup bisa dinyalakan/dimatikan di admin (bot harus admin di sana).
 
+## Versi web (browser biasa)
+- `https://<domain>/app/` bisa dibuka di Chrome/laptop. Masuk lewat bot: `/loginweb` (tombol "🌐 Login Web")
+  memberi tautan sekali pakai `app/?login=TOKEN` + kode 6 angka untuk laptop (5 menit, sekali pakai).
+- Sesi web 30 hari (header `X-Web-Session`, di DB hanya hash-nya: tabel `web_logins`, `web_sessions`,
+  dibuat otomatis oleh `lib/weblogin.php`). `/logoutweb` di bot mengeluarkan semua perangkat web.
+- Setelah deploy, tekan sekali "Pasang webhook" di Admin → Pengaturan agar /loginweb muncul di daftar perintah bot.
+
 ## Pemasangan di cPanel
 1. Buat subdomain (mis. `nonton.domain.com`) dengan SSL aktif (Mini App wajib HTTPS).
 2. Unggah semua isi folder ini ke folder subdomain tersebut.

@@ -62,6 +62,8 @@ try {
         q("DELETE FROM views WHERE d < DATE_SUB(CURDATE(), INTERVAL 90 DAY)");
         require_once dirname(__DIR__) . '/lib/imgproxy.php';
         $out['img_cleaned'] = img_cleanup();
+        require_once dirname(__DIR__) . '/lib/weblogin.php';
+        wl_cleanup();
     }
 } catch (Exception $e) {
     app_log('cron', $e->getMessage());

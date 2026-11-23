@@ -48,10 +48,21 @@
     users: '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>'
   };
 
+  // Versi web (browser biasa): masuk lewat /loginweb di bot, sesi disimpan di browser
+  var WS = '';
+  try { WS = localStorage.getItem('ws') || ''; } catch (e) {}
+  function inApp() { return !!(TG && TG.initData); }
+  function webLogout() {
+    try { localStorage.removeItem('ws'); localStorage.removeItem('boot2'); } catch (e) {}
+    WS = '';
+  }
+
   function api(action, params, method) {
     params = params || {};
     var url = API + '?a=' + action;
-    var opt = { method: method || 'GET', headers: { 'X-Init-Data': TG ? TG.initData : '' } };
+    var opt = { method: method || 'GET', headers: {} };
+    if (inApp()) opt.headers['X-Init-Data'] = TG.initData;
+    else if (WS) opt.headers['X-Web-Session'] = WS;
     if (opt.method === 'GET') {
       Object.keys(params).forEach(function (k) { url += '&' + enc(k) + '=' + enc(params[k]); });
     } else {
@@ -60,7 +71,15 @@
     }
     return fetch(url, opt).then(function (r) {
       return r.json().catch(function () { return { ok: false, error: 'Server tidak menjawab dengan benar.' }; })
-        .then(function (j) { j._status = r.status; return j; });
+        .then(function (j) {
+          j._status = r.status;
+          // Sesi web habis / dikeluarkan dari bot (/logoutweb) -> kembali ke halaman masuk
+          if (r.status === 401 && j.login && !inApp() && action !== 'web_login') {
+            webLogout(); renderLogin(j.error);
+            return new Promise(function () {}); // hentikan penanganan berikutnya (halaman masuk sudah tampil)
+          }
+          return j;
+        });
     }).catch(function () { return { ok: false, error: 'Koneksi bermasalah, coba lagi.' }; });
   }
 
@@ -194,8 +213,9 @@
   function renderHome() {
     var app = S.boot.app, u = S.boot.user;
     var provs = app.providers;
+    var vipBadge = u.vip ? '<span class="badge">VIP</span>' : '<a class="badge" href="#/vip">Jadi VIP</a>';
     var head = '<div class="top"><div class="brand"><div class="logo">' + (app.logo ? img(app.logo, '') : ICON.play) + '</div>' + esc(app.name) + '</div>' +
-      (u.vip ? '<span class="badge">VIP</span>' : '<a class="badge" href="#/vip">Jadi VIP</a>') + '</div>' +
+      (inApp() ? vipBadge : '<div class="row" style="gap:8px">' + vipBadge + '<a class="me-chip" href="#/me" aria-label="Profil">' + esc((u.name || '?').trim().charAt(0).toUpperCase()) + '</a></div>') + '</div>' +
       '<a class="searchbar" href="#/search">' + ICON.search + 'Cari film, drama, anime…</a>' +
       (provs.length > 1 ? '<div class="chips">' + provs.map(function (p) {
         return '<button class="chip' + (p.id === S.prov ? ' on' : '') + '" data-prov="' + esc(p.id) + '">' + esc(p.name) + '</button>';
@@ -342,9 +362,11 @@
   }
   function extNote() {
     if (isIOS()) return '<div class="card extnote warn">⚠️ <b>Tidak bisa diputar di iPhone/iPad.</b> Video Prime Video dikunci pengaman Amazon yang hanya jalan di <b>HP Android</b> (lewat Chrome). Gunakan HP Android untuk menonton judul ini.</div>';
+    if (!inApp()) return '<div class="card extnote">▶️ Judul Prime Video diputar di halaman pemutar khusus. Butuh <b>Chrome</b> (HP Android atau laptop). Tidak bisa diputar di iPhone/iPad.</div>';
     return '<div class="card extnote">▶️ Judul Prime Video diputar di <b>aplikasi Chrome</b>, bukan di dalam Telegram. Tidak bisa diputar di iPhone/iPad.</div>';
   }
   function openExternal(url) {
+    if (!inApp()) { location.href = url; return; } // versi web: langsung buka pemutar di tab ini
     try { if (TG && TG.openLink) return TG.openLink(url, { try_instant_view: false }); } catch (e) {}
     window.open(url, '_blank');
   }
@@ -485,8 +507,11 @@
     o.innerHTML = ios
       ? '<div style="font-weight:800;font-size:16px">⚠️ Tidak bisa di iPhone/iPad</div><div class="muted" style="font-size:13px;max-width:300px">Video Prime Video dikunci pengaman Amazon yang hanya jalan di HP Android. Silakan tonton dari HP Android.</div>' +
         '<button class="btn btn-ghost" id="extGo">Tetap coba buka</button>'
-      : '<div style="font-weight:800;font-size:16px">Diputar di Chrome</div><div class="muted" style="font-size:13px;max-width:300px">Video Prime Video dilindungi pengaman Amazon, jadi diputar di aplikasi Chrome. Selesai menonton, kembali ke Telegram.</div>' +
-        '<button class="btn btn-accent" id="extGo">' + ICON.play + 'Tonton di Chrome</button>';
+      : !inApp()
+        ? '<div style="font-weight:800;font-size:16px">Pemutar khusus Prime Video</div><div class="muted" style="font-size:13px;max-width:300px">Video Prime Video dilindungi pengaman Amazon, jadi diputar di halaman pemutar khusus (butuh Chrome).</div>' +
+          '<button class="btn btn-accent" id="extGo">' + ICON.play + 'Tonton</button>'
+        : '<div style="font-weight:800;font-size:16px">Diputar di Chrome</div><div class="muted" style="font-size:13px;max-width:300px">Video Prime Video dilindungi pengaman Amazon, jadi diputar di aplikasi Chrome. Selesai menonton, kembali ke Telegram.</div>' +
+          '<button class="btn btn-accent" id="extGo">' + ICON.play + 'Tonton di Chrome</button>';
     pl.appendChild(o);
     opts.innerHTML = data.preview ? '<div class="card" style="font-size:13px;line-height:1.5">Mode gratis: bisa ditonton <b>' + Math.round(data.preview / 60) + ' menit</b> pertama. <a href="#/vip" style="color:var(--accent);font-weight:700">Jadi VIP</a> untuk menonton penuh.</div>' : '';
     document.getElementById('extGo').onclick = function () { haptic(); openExternal(data.external); };
@@ -981,7 +1006,8 @@
       '<div class="pad"><div class="card row between" style="border:1px solid ' + (u.vip ? 'var(--accent)' : 'var(--line)') + '"><div style="display:flex;flex-direction:column;gap:3px">' +
       '<b>' + (u.vip ? 'VIP aktif' : 'Akun gratis') + '</b><span class="muted" style="font-size:12px">' + (u.vip ? 'Sampai ' + fmtDate(u.vip_until) : 'Episode 1 & cuplikan film gratis') + '</span></div>' +
       '<a class="btn btn-accent" style="height:36px;font-size:13px" href="#/vip">' + (u.vip ? 'Perpanjang' : 'Jadi VIP') + '</a></div>' +
-      '<div class="card row between" style="margin-top:10px;background:var(--surface2)"><span style="font-size:13px">Notifikasi episode baru</span><button class="switch' + (u.notify ? ' on' : '') + '" id="notif" aria-label="Notifikasi"></button></div></div>' +
+      '<div class="card row between" style="margin-top:10px;background:var(--surface2)"><span style="font-size:13px">Notifikasi episode baru</span><button class="switch' + (u.notify ? ' on' : '') + '" id="notif" aria-label="Notifikasi"></button></div>' +
+      (inApp() ? '' : '<button class="btn btn-line btn-block" id="logout" style="margin-top:10px;height:40px;font-size:13px">Keluar dari browser ini</button>') + '</div>' +
       '<div class="tabs" style="margin-top:18px"><button data-tab="hist" class="' + (tab === 'hist' ? 'on' : '') + '">Riwayat</button><button data-tab="fav" class="' + (tab === 'fav' ? 'on' : '') + '">Favorit</button></div>' +
       '<div id="list" style="padding-top:8px"><div class="center-load" style="min-height:120px"><div class="spinner"></div></div></div>';
     document.getElementById('notif').onclick = function () {
@@ -992,6 +1018,11 @@
     $view.querySelectorAll('.tabs [data-tab]').forEach(function (b) {
       b.onclick = function () { location.replace(b.getAttribute('data-tab') === 'fav' ? '#/me/fav' : '#/me'); };
     });
+    var lo = document.getElementById('logout');
+    if (lo) lo.onclick = function () {
+      lo.disabled = true;
+      api('web_logout', {}, 'POST').then(function () { webLogout(); S.boot = null; location.hash = '#/'; renderLogin(); });
+    };
     var $l = document.getElementById('list');
     api(tab === 'fav' ? 'favorites' : 'history').then(function (j) {
       if (!j.ok) { $l.innerHTML = errBox(j.error); return; }
@@ -1007,6 +1038,56 @@
     });
   }
 
+  /* ---------------- masuk versi web ---------------- */
+  function webSaved(sess) {
+    WS = sess;
+    try { localStorage.setItem('ws', sess); localStorage.removeItem('boot2'); } catch (e) {}
+  }
+  function renderLogin(err) {
+    S.boot = null;
+    clearTimers();
+    $tab.hidden = true;
+    var draw = function (app) {
+      app = app || {};
+      if (app.color) applyTheme({ color: app.color, name: app.name });
+      var bot = app.bot ? String(app.bot).replace(/^@/, '') : '';
+      var tgIcon = '<svg viewBox="0 0 24 24" style="fill:#fff;stroke:none"><path d="M21.9 4.3 18.6 19.8c-.2 1.1-.9 1.4-1.8.9l-5-3.7-2.4 2.3c-.3.3-.5.5-1 .5l.4-5.1 9.3-8.4c.4-.4-.1-.6-.6-.2L6 13.3l-4.9-1.5c-1.1-.3-1.1-1.1.2-1.6L20.5 2.8c.9-.3 1.7.2 1.4 1.5z"/></svg>';
+      $view.innerHTML = '<div class="login">' +
+        '<div class="brand"><div class="logo">' + (app.logo ? img(app.logo, '') : ICON.play) + '</div>' + esc(app.name || 'Nonton') + '</div>' +
+        '<div class="login-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>' +
+        '<h1 class="h1" style="text-wrap:balance">Drama, film &amp; anime subtitle Indonesia</h1>' +
+        (app.providers && app.providers.length ? '<div class="login-chips">' + app.providers.map(function (n) { return '<span class="chip">' + esc(n) + '</span>'; }).join('') + '</div>' : '') +
+        '<p class="muted" style="margin:0;line-height:1.55">Masuk pakai bot ' + (bot ? '<b style="color:var(--text)">@' + esc(bot) + '</b>' : 'Telegram kami') + '. Tidak perlu nomor HP, daftar, atau password.</p>' +
+        (err ? errBox(err).replace('class="err"', 'class="err" style="margin:0"') : '') +
+        (bot ? '<a class="btn btn-tg btn-block" href="https://t.me/' + enc(bot) + '" target="_blank" rel="noopener">' + tgIcon + 'Buka bot Telegram</a>' : '') +
+        '<p class="muted" style="margin:0;font-size:12.5px;text-align:center;line-height:1.5">Di bot, tekan tombol <b style="color:var(--text)">🌐 Login Web</b> (atau ketik <b style="color:var(--text)">/loginweb</b>), lalu tekan <b style="color:var(--text)">Masuk ke Web</b>.</p>' +
+        '<div class="login-or"><span>atau masukkan kode dari bot</span></div>' +
+        '<form id="lf" class="login-code" autocomplete="off"><input id="lcode" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" placeholder="000 000" aria-label="Kode 6 angka">' +
+        '<button class="btn btn-accent" id="lbtn" type="submit">Masuk</button></form>' +
+        '</div>';
+      var inp = document.getElementById('lcode'), btn = document.getElementById('lbtn');
+      var send = function () {
+        var code = inp.value.replace(/\D/g, '');
+        if (code.length !== 6) { toast('Kode terdiri dari 6 angka.'); inp.focus(); return; }
+        btn.disabled = true; btn.textContent = 'Memeriksa…';
+        api('web_login', { code: code }, 'POST').then(function (j) {
+          if (!j.ok) { btn.disabled = false; btn.textContent = 'Masuk'; toast(j.error); inp.select(); return; }
+          webSaved(j.session);
+          location.replace(location.pathname + location.hash); // muat ulang dalam keadaan sudah masuk
+        });
+      };
+      document.getElementById('lf').onsubmit = function (e) { e.preventDefault(); send(); };
+      inp.oninput = function () {
+        var d = inp.value.replace(/\D/g, '').slice(0, 6);
+        inp.value = d.length > 3 ? d.slice(0, 3) + ' ' + d.slice(3) : d;
+        if (d.length === 6 && !btn.disabled) send();
+      };
+    };
+    if (S.webInfo) return draw(S.webInfo);
+    loading();
+    api('web_info').then(function (j) { S.webInfo = j.ok ? j.app : null; draw(S.webInfo); });
+  }
+
   /* ---------------- mulai ---------------- */
   function start() {
     if (TG) {
@@ -1017,9 +1098,19 @@
         history.length > 1 ? history.back() : (location.hash = '#/');
       });
     }
-    if (!TG || !TG.initData) {
-      $view.innerHTML = '<div class="empty" style="padding-top:30vh">Buka aplikasi ini dari bot Telegram.</div>';
-      return;
+    if (!inApp()) {
+      // Versi web: ?login=TOKEN dari tombol "Masuk ke Web" di bot -> tukar jadi sesi
+      var lm = /[?&]login=([a-f0-9]{48})/.exec(location.search);
+      if (lm) {
+        api('web_login', { token: lm[1] }, 'POST').then(function (j) {
+          try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+          if (!j.ok) return renderLogin(j.error);
+          webSaved(j.session);
+          location.replace(location.pathname + location.hash); // muat ulang dalam keadaan sudah masuk
+        });
+        return;
+      }
+      if (!WS) { renderLogin(); return; }
     }
     // Beranda diminta BERSAMAAN dengan boot (bukan menunggu boot selesai)
     var lastProv = 'filmbox';

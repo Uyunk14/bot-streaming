@@ -27,6 +27,15 @@ function tg_app_button($text = null, $path = '')
     ]]]];
 }
 
+/**
+ * Tombol tetap di bawah chat. Sengaja tombol teks biasa (bukan web_app): Mini App yang dibuka
+ * dari tombol keyboard tidak membawa initData, jadi "Buka Aplikasi" dibalas tombol inline.
+ */
+function tg_reply_keyboard()
+{
+    return ['keyboard' => [[['text' => '🎬 Buka Aplikasi'], ['text' => '🌐 Login Web']]], 'resize_keyboard' => true, 'is_persistent' => true];
+}
+
 function tg_send($chatId, $text, $markup = null, $extra = [])
 {
     $p = array_merge(['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML', 'disable_web_page_preview' => true], $extra);

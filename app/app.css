@@ -219,3 +219,24 @@ input.search{flex:1;background:transparent;border:0;outline:none;color:var(--tex
 /* Catatan provider ber-DRM */
 .extnote{font-size:13px;line-height:1.5;margin-top:12px}
 .extnote.warn{border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.1)}
+
+/* ---------- versi web: halaman masuk ---------- */
+.login{max-width:420px;margin:0 auto;padding:28px 20px 40px;display:flex;flex-direction:column;gap:16px}
+.login-art{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.login-art i{aspect-ratio:3/4;border-radius:10px;background:linear-gradient(160deg,#3a2f7a,#1A1C22)}
+.login-art i:nth-child(2){background:linear-gradient(160deg,#7a2f4f,#1A1C22)}
+.login-art i:nth-child(3){background:linear-gradient(160deg,#2f6a7a,#1A1C22)}
+.login-art i:nth-child(4){background:linear-gradient(160deg,#7a5c2f,#1A1C22)}
+.login-art i:nth-child(5){background:linear-gradient(160deg,#2f7a4c,#1A1C22)}
+.login-art i:nth-child(n+4){display:none}
+.login-chips{display:flex;flex-wrap:wrap;gap:6px}
+.login-chips .chip{padding:6px 11px;font-size:12px}
+.btn-tg{background:#2AABEE;color:#fff}
+.btn-tg svg{width:18px;height:18px}
+.login-or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
+.login-or::before,.login-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.login-code{display:flex;gap:8px}
+.login-code input{flex:1;min-width:0;height:46px;border-radius:12px;border:1px solid #2A2D36;background:var(--surface);color:var(--text);font:inherit;font-size:20px;font-weight:700;letter-spacing:4px;text-align:center;font-variant-numeric:tabular-nums;outline:none}
+.login-code input:focus{border-color:var(--accent)}
+.login-code .btn{flex-shrink:0}
+.me-chip{width:30px;height:30px;border-radius:50%;background:#2A2D36;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}

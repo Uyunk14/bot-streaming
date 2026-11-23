@@ -65,8 +65,23 @@ try {
             [['text' => '🧪 Tes di Telegram', 'web_app' => ['url' => $url]]],
             [['text' => '🌐 Buka di Chrome', 'url' => $url]],
         ]]);
+    } elseif ($cmd === '/loginweb' || $text === '🌐 Login Web') {
+        // Masuk ke versi web (browser biasa): tautan sekali pakai + kode 6 angka untuk laptop
+        require_once dirname(__DIR__) . '/lib/weblogin.php';
+        if (!empty($user['banned'])) { tg_send($chat, 'Akun kamu diblokir admin.'); exit; }
+        $wl = wl_create($user['id']);
+        if (!$wl) { tg_send($chat, 'Gagal membuat kode, coba lagi sebentar.'); exit; }
+        $c = $wl['code'];
+        tg_send($chat, "🌐 <b>Masuk ke $botName Web</b>\nTekan tombol di bawah untuk masuk di browser HP ini.\n\nDi laptop? Buka <b>" . e(preg_replace('#^https?://#', '', base_url())) . "</b> lalu masukkan kode:\n<code>" . substr($c, 0, 3) . ' ' . substr($c, 3) . "</code>\n\n<i>Berlaku 5 menit, sekali pakai. Jangan berikan ke orang lain.</i>",
+            ['inline_keyboard' => [[['text' => '🌐 Masuk ke Web', 'url' => $wl['url']]]]]);
+    } elseif ($cmd === '/logoutweb') {
+        require_once dirname(__DIR__) . '/lib/weblogin.php';
+        $n = wl_logout_all($user['id']);
+        tg_send($chat, $n ? "✅ $n perangkat web sudah dikeluarkan." : 'Tidak ada perangkat web yang sedang masuk.', tg_reply_keyboard());
+    } elseif ($text === '🎬 Buka Aplikasi') {
+        tg_send($chat, 'Tekan tombol di bawah untuk membuka aplikasi.', tg_app_button());
     } elseif ($cmd === '/help' || $cmd === '/bantuan') {
-        tg_send($chat, "<b>$botName</b>\n/start — buka aplikasi\n/vip — cek status VIP\n\nCari judul langsung di aplikasi lewat tombol di bawah.", tg_app_button());
+        tg_send($chat, "<b>$botName</b>\n/start — buka aplikasi\n/vip — cek status VIP\n/loginweb — masuk di browser (HP/laptop)\n/logoutweb — keluarkan semua perangkat web\n\nCari judul langsung di aplikasi lewat tombol menu.", tg_reply_keyboard());
     } else {
         // Teks biasa dianggap pencarian -> buka aplikasi di halaman cari
         $q = mb_substr($text, 0, 60);

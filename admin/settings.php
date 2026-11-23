@@ -42,6 +42,8 @@ if ($act && csrf_check()) {
             tg('setMyCommands', ['commands' => [
                 ['command' => 'start', 'description' => 'Buka aplikasi'],
                 ['command' => 'vip', 'description' => 'Cek status VIP'],
+                ['command' => 'loginweb', 'description' => 'Masuk di browser (HP/laptop)'],
+                ['command' => 'logoutweb', 'description' => 'Keluarkan semua perangkat web'],
                 ['command' => 'help', 'description' => 'Bantuan'],
             ]]);
             if (!empty($r['ok']) && !empty($r2['ok'])) flash('Webhook & tombol Mini App terpasang untuk @' . $me['result']['username'] . '.');
