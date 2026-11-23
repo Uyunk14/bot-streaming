@@ -33,7 +33,25 @@ function tg_app_button($text = null, $path = '')
  */
 function tg_reply_keyboard()
 {
-    return ['keyboard' => [[['text' => '🎬 Buka Aplikasi'], ['text' => '🌐 Login Web']]], 'resize_keyboard' => true, 'is_persistent' => true];
+    $rows = [];
+    foreach (array_chunk(array_keys(tg_menu_buttons()), 2) as $pair) {
+        $rows[] = array_map(function ($t) { return ['text' => $t]; }, $pair);
+    }
+    return ['keyboard' => $rows, 'resize_keyboard' => true, 'is_persistent' => true];
+}
+
+/** Teks tombol menu bawah => perintah yang dijalankan (urutan = urutan tombol, 2 per baris). */
+function tg_menu_buttons()
+{
+    return [
+        '🎬 Buka Aplikasi' => '/app',
+        '👑 Status VIP' => '/vip',
+        '💎 Beli VIP' => '/buyvip',
+        '🔎 Cari Judul' => '/cari',
+        '🌐 Login Web' => '/loginweb',
+        '🚪 Keluar dari Web' => '/logoutweb',
+        '❓ Bantuan' => '/help',
+    ];
 }
 
 function tg_send($chatId, $text, $markup = null, $extra = [])
