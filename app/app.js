@@ -459,6 +459,35 @@
   }
 
   /* ---------------- tonton ---------------- */
+  // Isi panel "Lihat detail & semua episode" di halaman tonton
+  function watchEpsHTML(p, d, showSe, curSe, curEp) {
+    var vip = S.boot.user.vip;
+    var s = d.seasons.filter(function (x) { return x.season === showSe && x.episodes.length; })[0];
+    if (!s) return '<span class="muted">Belum ada episode.</span>';
+    return s.episodes.map(function (e) {
+      var free = d.free.indexOf(s.season + ':' + e) >= 0, ok = vip || free;
+      var cur = s.season === curSe && e === curEp;
+      if (cur) return '<span class="ep cur" aria-current="true">' + e + '<small>DIPUTAR</small></span>';
+      return '<a class="ep' + (free && !vip ? ' free' : '') + '" href="' + (ok ? watchHref(p, d.id, d.path, s.season, e) : '#/vip') + '">' + e +
+        (!ok ? ICON.lock : (free && !vip ? '<small>GRATIS</small>' : '')) + '</a>';
+    }).join('');
+  }
+  function watchMoreHTML(p, d, curSe, curEp) {
+    var meta = [d.rating ? '<span class="star">★ ' + d.rating + '</span>' : '', d.year, d.country, d.type === 2 ? 'Series' : 'Film'].filter(Boolean).join('<span>·</span>');
+    var genres = (d.genre || '').split(',').map(function (g) { return g.trim(); }).filter(Boolean).map(function (g) { return '<span>' + esc(g) + '</span>'; }).join('');
+    var html = '<div class="meta">' + meta + '</div>' + (genres ? '<div class="genres">' + genres + '</div>' : '') +
+      (d.description ? '<p class="desc clamp" id="wDesc" style="margin:0">' + esc(d.description) + '</p><button class="more" id="wDescMore" style="align-self:flex-start">Selengkapnya</button>' : '');
+    if (d.type === 2) {
+      var seasons = d.seasons.filter(function (s) { return s.episodes.length; });
+      var showSe = seasons.some(function (s) { return s.season === curSe; }) ? curSe : (seasons[0] ? seasons[0].season : 0);
+      html += '<div class="row between" style="margin-top:4px"><span class="h2">Episode</span><span class="muted" style="font-size:12px">' + epsOf(d).length + ' episode</span></div>' +
+        (seasons.length > 1 ? '<div class="chips" style="padding:0">' + seasons.map(function (s) {
+          return '<button class="chip' + (s.season === showSe ? ' on' : '') + '" data-wse="' + s.season + '">Season ' + s.season + '</button>';
+        }).join('') + '</div>' : '') +
+        '<div class="eps" id="wEps">' + watchEpsHTML(p, d, showSe, curSe, curEp) + '</div>';
+    }
+    return html;
+  }
   function hlsProv(p) {
     return ((S.boot && S.boot.app.providers) || []).some(function (x) { return x.id === p && x.hls; });
   }
@@ -480,9 +509,28 @@
         (d.type === 2 ? '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">' +
           (prev ? '<a class="btn btn-ghost" href="' + (canWatch(d, prev.se, prev.ep) ? watchHref(p, id, path, prev.se, prev.ep) : '#/vip') + '">‹ Eps ' + prev.ep + '</a>' : '<span></span>') +
           (next ? '<a class="btn btn-accent" href="' + (canWatch(d, next.se, next.ep) ? watchHref(p, id, path, next.se, next.ep) : '#/vip') + '">Eps ' + next.ep + ' ›</a>' : '<span></span>') + '</div>' : '') +
-        '<a class="row" href="' + detailHref(p, d) + '" style="color:var(--muted);font-size:13px">' + ICON.chev + 'Lihat detail & semua episode</a></div>';
+        '<button class="row more-toggle" id="moreBtn" aria-expanded="false">' + ICON.chev + 'Lihat detail & semua episode</button>' +
+        '<div id="morePanel" class="more-panel" hidden></div></div>';
 
       var vid = document.getElementById('vid'), pl = document.getElementById('pl'), opts = document.getElementById('opts');
+      // Detail & daftar episode dibuka DI BAWAH pemutar (bukan pindah halaman), jadi video tetap jalan
+      var moreBtn = document.getElementById('moreBtn'), morePanel = document.getElementById('morePanel');
+      moreBtn.onclick = function () {
+        var open = morePanel.hidden;
+        morePanel.hidden = !open;
+        moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open && !morePanel.innerHTML) morePanel.innerHTML = watchMoreHTML(p, d, se, ep);
+        if (open) {
+          var md2 = document.getElementById('wDescMore');
+          if (md2) md2.onclick = function () { document.getElementById('wDesc').classList.remove('clamp'); md2.remove(); };
+          morePanel.querySelectorAll('[data-wse]').forEach(function (b) {
+            b.onclick = function () {
+              morePanel.querySelectorAll('[data-wse]').forEach(function (c) { c.classList.toggle('on', c === b); });
+              document.getElementById('wEps').innerHTML = watchEpsHTML(p, d, +b.getAttribute('data-wse'), se, ep);
+            };
+          });
+        }
+      };
       api('play', { p: p, id: id, path: path, se: se, ep: ep }).then(function (j) {
         if (!j.ok) {
           if (j.gate) { S.boot.gate = j.gate; return route(); }

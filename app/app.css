@@ -240,3 +240,10 @@ input.search{flex:1;background:transparent;border:0;outline:none;color:var(--tex
 .login-code input:focus{border-color:var(--accent)}
 .login-code .btn{flex-shrink:0}
 .me-chip{width:30px;height:30px;border-radius:50%;background:#2A2D36;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+
+/* ---------- halaman tonton: panel detail & episode (video tetap jalan) ---------- */
+.more-toggle{gap:8px;color:var(--muted);font-size:13px;padding:4px 0;align-self:flex-start;text-align:left}
+.more-toggle svg{width:16px;height:16px;transition:transform .2s}
+.more-toggle[aria-expanded="true"] svg{transform:rotate(90deg)}
+.more-panel{display:flex;flex-direction:column;gap:12px}
+@media (prefers-reduced-motion:reduce){.more-toggle svg{transition:none}}
